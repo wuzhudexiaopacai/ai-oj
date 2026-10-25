@@ -16,9 +16,11 @@ public interface AiChatService {
      *
      * @param sessionId 会话 ID
      * @param question  用户问题
+     * @param code      用户当前代码（可为空，为空时不注入代码上下文）
+     * @param language  当前代码语言（可为空）
      * @return SSE 发射器
      */
-    SseEmitter streamChat(Long sessionId, String question);
+    SseEmitter streamChat(Long sessionId, String question, String code, String language);
 
     /**
      * 同步代码评审

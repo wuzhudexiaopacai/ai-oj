@@ -12,7 +12,7 @@
 | 微服务治理 | Nacos 2.4.3（注册+配置）、Spring Cloud Gateway、OpenFeign、Sentinel |
 | 数据层 | MySQL 8.0.40、MyBatis-Plus、Redis 7.4（Redisson）、Elasticsearch 8.19 |
 | 消息与任务 | RocketMQ 5.3.2、Quartz（JDBC 持久化）、Seata 2.3（AT 分布式事务） |
-| AI 能力 | Spring AI 1.0（ChatClient 流式）、会话/提示词模板持久化 |
+| AI 能力 | Spring AI Alibaba 1.0.0.4（DashScope/通义千问原生协议）、ChatClient 流式 SSE、Nacos 配置热更新 |
 | 评测沙箱 | **Rust**（axum + bollard + tokio），Docker 容器级隔离 |
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + Monaco Editor |
 | 部署 | Docker Compose 一键编排 |

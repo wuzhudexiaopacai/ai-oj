@@ -1,4 +1,4 @@
-# AI-OJ 智能服务（Spring AI）
+# AI-OJ 智能服务（Spring AI Alibaba / DashScope 原生协议）
 # @author wuzhudexiaopacai
 server:
   port: 9006
@@ -13,11 +13,12 @@ spring:
       maximum-pool-size: 20
       minimum-idle: 5
   ai:
-    openai:
-      # 兼容 OpenAI 协议的模型均可接入（DeepSeek / 通义 / Moonshot 等）
-      base-url: https://dashscope.aliyuncs.com/compatible-mode
-      # 部署时通过环境变量覆盖：SPRING_AI_OPENAI_API_KEY
-      api-key: sk-ws-H.EDMYILL.ykEA.MEUCIQDuAik2TdD2yY4s9eEBNwce6JorIS1iSLNHuy_nj1J1hgIgPexf-pY2FafWW98HqQF_Yd9uvelKFcCy9zT_pcLHqcw
+    # Spring AI Alibaba DashScope 接入（通义千问原生接口，非 OpenAI 兼容层）
+    # 以下配置在 Nacos 中修改后由 @RefreshScope 自动重建模型，无需重启服务
+    dashscope:
+      base-url: https://dashscope.aliyuncs.com
+      # 部署时通过环境变量覆盖：DASHSCOPE_API_KEY
+      api-key: ${DASHSCOPE_API_KEY}
       chat:
         options:
           model: qwen-plus

@@ -14,20 +14,27 @@ export function createAiSession(data) {
 }
 
 /**
- * 流式对话
+ * 流式对话（POST + SSE）
+ *
+ * <p>用 POST 而不是 GET：当前代码可能有数千行，放 URL 里会超出长度限制。</p>
  *
  * @param {object} params
  * @param {number} params.sessionId 会话 ID
  * @param {string} params.question  用户问题
+ * @param {string} [params.code]    用户当前编辑器代码（随每次提问上报，AI 才能看到最新代码）
+ * @param {string} [params.language] 当前代码语言
  * @param {(token: string) => void} params.onToken 逐 token 回调
  * @param {AbortSignal} [params.signal] 取消信号
  */
-export async function streamChat({ sessionId, question, onToken, signal }) {
+export async function streamChat({ sessionId, question, code, language, onToken, signal }) {
   const token = localStorage.getItem('ai-oj-token')
-  const url = `/api/ai/chat/stream?sessionId=${encodeURIComponent(sessionId)}`
-      + `&question=${encodeURIComponent(question)}`
-  const resp = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  const resp = await fetch('/api/ai/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({ sessionId, question, code, language }),
     signal
   })
   if (!resp.ok || !resp.body) {

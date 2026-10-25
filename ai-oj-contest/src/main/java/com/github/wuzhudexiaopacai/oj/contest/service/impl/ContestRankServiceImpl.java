@@ -10,7 +10,6 @@ import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
-import com.github.wuzhudexiaopacai.oj.contest.config.ContestProperties;
 import com.github.wuzhudexiaopacai.oj.contest.entity.Contest;
 import com.github.wuzhudexiaopacai.oj.contest.mapper.ContestMapper;
 import com.github.wuzhudexiaopacai.oj.contest.ranking.RankingStrategy;
@@ -19,10 +18,7 @@ import com.github.wuzhudexiaopacai.oj.contest.service.ContestRankService;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestRankVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -31,13 +27,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 比赛排行榜服务实现（ZSet 实时榜 + 封榜快照 + 策略模式排序）
+ * 比赛排行榜服务实现（成绩实时重建 + 封榜快照 + 策略模式排序）
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -48,17 +42,6 @@ import java.util.stream.Collectors;
 public class ContestRankServiceImpl implements ContestRankService {
 
     /**
-     * ACM 赛制 ZSet score 编码基数：score = acceptCount * 1e9 - penaltySeconds，
-     * 罚时小于 1e9 秒（约 31 年）时编码无损、可用 Math.ceil 反解
-     */
-    private static final double ACM_SCORE_BASE = 1_000_000_000.0D;
-
-    /**
-     * 排行榜重建分布式锁前缀：+ contestId
-     */
-    private static final String RANK_LOCK_KEY = "contest:lock:rank:";
-
-    /**
      * 比赛管理权限标识
      */
     private static final String AUTHORITY_CONTEST_MANAGE = "contest:manage";
@@ -67,15 +50,11 @@ public class ContestRankServiceImpl implements ContestRankService {
 
     private final RedisTemplate<String, Object> redisTemplate;
 
-    private final RedissonClient redissonClient;
-
     private final JudgeFeignClient judgeFeignClient;
 
     private final AuthFeignClient authFeignClient;
 
     private final RankingStrategyFactory rankingStrategyFactory;
-
-    private final ContestProperties contestProperties;
 
     @Override
     public List<ContestRankVO> rank(Long contestId) {
@@ -98,51 +77,26 @@ public class ContestRankServiceImpl implements ContestRankService {
             }
             log.warn("比赛已封榜但排行榜快照缺失，降级为实时查询 contestId={}", contestId);
         }
-        // 先 ZREVRANGE 读实时榜 ZSet（member=userId，平时由 judge 服务按判题结果增量维护）
-        String zsetKey = RedisKeys.CONTEST_RANK_ZSET + contestId;
-        Set<ZSetOperations.TypedTuple<Object>> tuples =
-                redisTemplate.opsForZSet().reverseRangeWithScores(zsetKey, 0, -1);
-        if (tuples != null && !tuples.isEmpty()) {
-            return buildRankFromZSet(contest, tuples);
-        }
-        // 缓存 miss：分布式锁 + 双重检查重建（防缓存击穿）
-        RLock lock = redissonClient.getLock(RANK_LOCK_KEY + contestId);
-        lock.lock();
-        try {
-            tuples = redisTemplate.opsForZSet().reverseRangeWithScores(zsetKey, 0, -1);
-            if (tuples != null && !tuples.isEmpty()) {
-                return buildRankFromZSet(contest, tuples);
-            }
-            return rebuildRankCache(contest, zsetKey);
-        } finally {
-            lock.unlock();
-        }
+        // 实时榜每次从成绩源重建：增量 ZSet 会漏掉未增量写入/缓存过期的用户，导致榜单人数不全
+        return rebuildRank(contest);
     }
 
     /**
-     * 重建排行榜 ZSet：拉取全量成绩 → 策略模式按赛制排序 → 回写 ZSet（TTL 取配置）
+     * 从判题服务拉取参赛成绩 → 按赛制策略排序 → 构建排行榜
+     * <p>
+     * judge 侧只返回比赛期间有提交记录的用户，未参赛的报名者不会出现在榜单中。
      */
-    private List<ContestRankVO> rebuildRankCache(Contest contest, String zsetKey) {
+    private List<ContestRankVO> rebuildRank(Contest contest) {
         Result<List<ContestRecordDTO>> result = judgeFeignClient.listContestRecord(contest.getId());
         if (result == null || !result.isSuccess() || result.getData() == null) {
             throw new BizException("比赛成绩服务暂不可用，请稍后重试");
         }
-        RankingStrategy strategy = rankingStrategyFactory.getStrategy(contest.getType());
-        List<ContestRecordDTO> sorted = strategy.sort(result.getData());
-        if (sorted.isEmpty()) {
+        List<ContestRecordDTO> records = result.getData();
+        if (records.isEmpty()) {
             return Collections.emptyList();
         }
-        boolean acm = isAcm(contest);
-        // 重建 ZSet（member=userId 字符串，score 按赛制编码，与 judge 服务实时维护的编码规则一致）
-        redisTemplate.delete(zsetKey);
-        for (ContestRecordDTO record : sorted) {
-            double score = acm
-                    ? nullToZero(record.getAcceptCount()) * ACM_SCORE_BASE - nullToZero(record.getPenaltySeconds())
-                    : nullToZero(record.getTotalScore());
-            redisTemplate.opsForZSet().add(zsetKey, String.valueOf(record.getUserId()), score);
-        }
-        redisTemplate.expire(zsetKey, contestProperties.getRankTtlSeconds(), TimeUnit.SECONDS);
-        return buildRankFromRecords(sorted);
+        RankingStrategy strategy = rankingStrategyFactory.getStrategy(contest.getType());
+        return buildRankFromRecords(strategy.sort(records));
     }
 
     /**
@@ -159,39 +113,6 @@ public class ContestRankServiceImpl implements ContestRankService {
             vo.setAcceptCount(nullToZero(record.getAcceptCount()));
             vo.setPenaltySeconds(nullToZero(record.getPenaltySeconds()));
             vo.setTotalScore(nullToZero(record.getTotalScore()));
-            ranks.add(vo);
-        }
-        fillUserBrief(ranks);
-        return ranks;
-    }
-
-    /**
-     * 从 ZSet 缓存构建排行榜（score 按赛制反解出业务字段，避免回源数据库）
-     */
-    private List<ContestRankVO> buildRankFromZSet(Contest contest, Set<ZSetOperations.TypedTuple<Object>> tuples) {
-        boolean acm = isAcm(contest);
-        List<ContestRankVO> ranks = new ArrayList<>(tuples.size());
-        int rankNo = 0;
-        for (ZSetOperations.TypedTuple<Object> tuple : tuples) {
-            Object value = tuple.getValue();
-            Double score = tuple.getScore();
-            if (value == null || score == null) {
-                continue;
-            }
-            ContestRankVO vo = new ContestRankVO();
-            vo.setRank(++rankNo);
-            vo.setUserId(Long.valueOf(value.toString()));
-            if (acm) {
-                // 反解：acceptCount = ceil(score / 1e9)，penaltySeconds = acceptCount * 1e9 - score
-                long acceptCount = (long) Math.ceil(score / ACM_SCORE_BASE);
-                vo.setAcceptCount((int) acceptCount);
-                vo.setPenaltySeconds((long) (acceptCount * ACM_SCORE_BASE - score));
-                vo.setTotalScore(0);
-            } else {
-                vo.setTotalScore((int) Math.round(score));
-                vo.setAcceptCount(0);
-                vo.setPenaltySeconds(0L);
-            }
             ranks.add(vo);
         }
         fillUserBrief(ranks);
@@ -228,13 +149,6 @@ public class ContestRankServiceImpl implements ContestRankService {
                 }
             }
         }
-    }
-
-    /**
-     * 是否 ACM 赛制（null/未知按 ACM 兜底，与策略工厂保持一致）
-     */
-    private boolean isAcm(Contest contest) {
-        return contest.getType() == null || contest.getType() == RankingStrategyFactory.TYPE_ACM;
     }
 
     private int nullToZero(Integer value) {

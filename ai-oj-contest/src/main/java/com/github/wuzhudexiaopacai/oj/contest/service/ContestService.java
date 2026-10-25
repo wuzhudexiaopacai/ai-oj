@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.contest.service;
 
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestPageQueryDTO;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestProblemBindDTO;
@@ -62,4 +63,13 @@ public interface ContestService {
      * @return 比赛题目关联 ID
      */
     Long bindProblem(Long contestId, ContestProblemBindDTO bindDTO);
+
+    /**
+     * 比赛运行时信息（判题服务校验比赛提交用）
+     *
+     * @param contestId 比赛 ID
+     * @param userId    用户 ID（可选，传入时回填是否报名）
+     * @return 运行时信息
+     */
+    ContestRuntimeDTO runtime(Long contestId, Long userId);
 }

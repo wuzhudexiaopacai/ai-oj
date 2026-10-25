@@ -1,10 +1,12 @@
 package com.github.wuzhudexiaopacai.oj.judge.mq;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.JudgeResultMessage;
+import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
-import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
+import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.entity.ContestRecord;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.ContestRecordMapper;
@@ -16,10 +18,10 @@ import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
+import java.time.ZoneId;
 
 /**
- * 比赛成绩消费者：判题结果更新 contest_record + 实时榜 ZSet
+ * 比赛成绩消费者：判题结果更新 contest_record（排行榜读取时按赛制实时排序）
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -40,6 +42,8 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
     private final StringRedisTemplate stringRedisTemplate;
+
+    private final ContestFeignClient contestFeignClient;
 
     @Override
     public void onMessage(JudgeResultMessage message) {
@@ -69,24 +73,37 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
         if (isAc) {
             stringRedisTemplate.opsForSet().add(solvedKey, message.getProblemId().toString());
             record.setAcceptCount(record.getAcceptCount() + 1);
-            // 罚时取舍说明：消息体不含比赛开赛时间，回查 contest 服务成本高；
-            // 用 judge_submission.create_time 与 contest_record.create_time 差值近似「距开赛秒数」，
-            // 前提是 contest_record 在比赛开始时初始化（报名时 Seata 事务写入），存在一定误差。
+            // 罚时 = 首次 AC 提交时间 - 比赛开始时间（sec）；报名时间与开赛时间无关，不能作为基准
             JudgeSubmission submission = judgeSubmissionMapper.selectOne(new LambdaQueryWrapper<JudgeSubmission>()
                     .eq(JudgeSubmission::getSubmitId, message.getSubmitId()));
-            if (submission != null && record.getCreateTime() != null && submission.getCreateTime() != null) {
-                long penalty = Duration.between(record.getCreateTime(), submission.getCreateTime()).getSeconds();
-                record.setPenaltySeconds(record.getPenaltySeconds() + Math.max(penalty, 0));
+            if (submission != null && submission.getCreateTime() != null) {
+                long startMillis = resolveContestStartMillis(message.getContestId(), record);
+                long submitMillis = submission.getCreateTime()
+                        .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                record.setPenaltySeconds(record.getPenaltySeconds()
+                        + Math.max((submitMillis - startMillis) / 1000, 0));
             }
         }
         // OI 模式总分累加（ACM 模式下该值由排行榜策略忽略）
         record.setTotalScore(record.getTotalScore() + (message.getScore() == null ? 0 : message.getScore()));
         contestRecordMapper.updateById(record);
+    }
 
-        // 刷新实时榜 ZSet：ACM = acceptCount * 1e9 - penaltySeconds（通过数优先，同数罚时少者优先）；
-        // OI = totalScore。公式注释便于 contest 服务直接 ZREVRANGE。
-        double rankScore = (double) record.getAcceptCount() * 1e9 - record.getPenaltySeconds();
-        stringRedisTemplate.opsForZSet().add(RedisKeys.CONTEST_RANK_ZSET + message.getContestId(),
-                message.getUserId().toString(), rankScore);
+    /**
+     * 获取比赛开始时间（epoch 毫秒）；比赛服务不可用时回退为报名时间并告警
+     */
+    private long resolveContestStartMillis(Long contestId, ContestRecord record) {
+        try {
+            Result<ContestRuntimeDTO> result = contestFeignClient.runtime(contestId, null);
+            if (result != null && result.isSuccess() && result.getData() != null
+                    && result.getData().getStartTimeMillis() != null) {
+                return result.getData().getStartTimeMillis();
+            }
+        } catch (Exception e) {
+            log.warn("查询比赛开始时间失败，罚时基准回退为报名时间 contestId={}", contestId, e);
+        }
+        return record.getCreateTime() == null
+                ? System.currentTimeMillis()
+                : record.getCreateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 }

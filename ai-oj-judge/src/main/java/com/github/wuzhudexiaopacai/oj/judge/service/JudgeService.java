@@ -1,12 +1,15 @@
 package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
+import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.annotation.Idempotent;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
+import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.core.result.ResultCode;
 import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeRunRequest;
@@ -59,6 +62,8 @@ public class JudgeService {
 
     private final SandboxClient sandboxClient;
 
+    private final ContestFeignClient contestFeignClient;
+
     @Value("${ai-oj.judge.submit-interval-seconds:5}")
     private long submitIntervalSeconds;
 
@@ -71,6 +76,9 @@ public class JudgeService {
     @Idempotent(key = "#req.submitId", expire = 30)
     public SubmitResultVO submit(JudgeSubmitRequest req) {
         Long userId = SecurityUtils.requireLogin().getId();
+        Long contestId = req.getContestId() == null ? 0L : req.getContestId();
+        // 比赛提交前置校验：已报名 + 比赛进行中 + 题目属于该比赛，杜绝赛前/赛后刷分
+        validateContestSubmission(contestId, req.getProblemId(), userId);
 
         // 第二层防重：同用户对同题提交频率锁
         String lockKey = RedisKeys.JUDGE_USER_LOCK + userId + ":" + req.getProblemId();
@@ -90,7 +98,7 @@ public class JudgeService {
         submission.setSubmitId(req.getSubmitId());
         submission.setUserId(userId);
         submission.setProblemId(req.getProblemId());
-        submission.setContestId(req.getContestId() == null ? 0L : req.getContestId());
+        submission.setContestId(contestId);
         submission.setLanguage(req.getLanguage());
         submission.setCode(req.getCode());
         submission.setCodeLength(req.getCode().length());
@@ -122,6 +130,42 @@ public class JudgeService {
                 5000);
 
         return new SubmitResultVO(submission.getId());
+    }
+
+    /**
+     * 校验比赛提交：已报名 + 比赛进行中 + 题目属于该比赛
+     * <p>
+     * 比赛成绩独立计算：只有比赛进行期间、带本次比赛 ID 的提交才会计入成绩，
+     * 赛前做过的题不会自动继承 AC，需要在比赛内重新提交。
+     *
+     * @param contestId 比赛 ID（0 表示非比赛提交，直接放行）
+     * @param problemId 题目 ID
+     * @param userId    提交用户
+     */
+    private void validateContestSubmission(Long contestId, Long problemId, Long userId) {
+        if (contestId == null || contestId == 0L) {
+            return;
+        }
+        Result<ContestRuntimeDTO> result;
+        try {
+            result = contestFeignClient.runtime(contestId, userId);
+        } catch (Exception e) {
+            log.error("查询比赛运行时信息失败 contestId={}", contestId, e);
+            throw new BizException("比赛服务暂不可用，请稍后重试");
+        }
+        if (result == null || !result.isSuccess() || result.getData() == null) {
+            throw new BizException("比赛不存在");
+        }
+        ContestRuntimeDTO runtime = result.getData();
+        Asserts.isTrue(!"CANCELED".equals(runtime.getStatus()), "比赛已取消");
+        Asserts.isTrue(Boolean.TRUE.equals(runtime.getRegistered()), "未报名该比赛，无法提交");
+        long now = System.currentTimeMillis();
+        Asserts.isTrue(runtime.getStartTimeMillis() == null || now >= runtime.getStartTimeMillis(),
+                "比赛尚未开始");
+        Asserts.isTrue(runtime.getEndTimeMillis() == null || now < runtime.getEndTimeMillis(),
+                "比赛已结束");
+        Asserts.isTrue(runtime.getProblemIds() != null && runtime.getProblemIds().contains(problemId),
+                "该题目不属于本场比赛");
     }
 
     /**

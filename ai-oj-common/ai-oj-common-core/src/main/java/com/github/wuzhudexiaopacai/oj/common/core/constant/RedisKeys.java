@@ -67,11 +67,6 @@ public class RedisKeys {
     public static final String CONTEST_RANK = "contest:rank:";
 
     /**
-     * 比赛实时榜 ZSet：+ contestId
-     */
-    public static final String CONTEST_RANK_ZSET = "contest:rank:zset:";
-
-    /**
      * AI 会话记忆：+ sessionId
      */
     public static final String AI_SESSION = "ai:session:";
@@ -80,6 +75,11 @@ public class RedisKeys {
      * AI 调用限流：+ userId
      */
     public static final String AI_RATE_LIMIT = "ai:rate:";
+
+    /**
+     * AI 题目上下文缓存：+ problemId
+     */
+    public static final String AI_PROBLEM_CONTEXT = "ai:problem:ctx:";
 
     /**
      * 分片上传上下文：+ md5

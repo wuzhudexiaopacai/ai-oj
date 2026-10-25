@@ -66,7 +66,7 @@ CREATE TABLE ai_prompt_template (
 ) ENGINE = InnoDB COMMENT 'AI 提示词模板表';
 
 INSERT INTO ai_prompt_template (id, code, name, template) VALUES
-(1, 'hint', '解题提示', '你是一位资深的算法竞赛教练。用户正在做题目：\n{problem}\n\n请给出循序渐进的解题提示（不要直接给出完整代码），用中文回答。用户问题：{question}'),
+(1, 'hint', '解题提示', '你是一位资深的算法竞赛教练。用户正在做题目：{problem}{code}\n\n请给出循序渐进的解题提示（不要直接给出完整代码），用中文回答。用户问题：{question}'),
 (2, 'review', '代码评审', '你是一位严格的代码评审专家。请评审以下 {language} 代码，指出潜在 bug、复杂度分析与改进建议，用中文回答：\n```{language}\n{code}\n```'),
 (3, 'generate', 'AI 出题', '你是一位算法竞赛出题人。请围绕知识点「{topic}」出一道难度为{difficulty}的题目，输出 JSON：{"title":"","description":"","inputDesc":"","outputDesc":"","samples":[{"input":"","output":""}]}'),
-(4, 'chat', '自由对话', '你是 AI-OJ 内置的编程助手，擅长算法与工程问题。用中文简洁回答用户问题：{question}');
+(4, 'chat', '自由对话', '你是 AI-OJ 内置的编程助手，擅长算法与工程问题。请结合下方题目信息与用户当前代码作答，用中文简洁回答。{problem}{code}\n\n用户问题：{question}');

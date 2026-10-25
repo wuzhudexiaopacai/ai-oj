@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.ai.controller;
 
+import com.github.wuzhudexiaopacai.oj.ai.dto.ChatStreamRequest;
 import com.github.wuzhudexiaopacai.oj.ai.dto.ReviewRequestDTO;
 import com.github.wuzhudexiaopacai.oj.ai.dto.TaskSubmitDTO;
 import com.github.wuzhudexiaopacai.oj.ai.service.AiChatService;
@@ -16,7 +17,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -37,10 +37,9 @@ public class AiChatController {
     private final AiTaskService aiTaskService;
 
     @Operation(summary = "流式对话（SSE）")
-    @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestParam("sessionId") Long sessionId,
-                             @RequestParam("question") String question) {
-        return aiChatService.streamChat(sessionId, question);
+    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream(@Validated @RequestBody ChatStreamRequest req) {
+        return aiChatService.streamChat(req.getSessionId(), req.getQuestion(), req.getCode(), req.getLanguage());
     }
 
     @Operation(summary = "同步代码评审")

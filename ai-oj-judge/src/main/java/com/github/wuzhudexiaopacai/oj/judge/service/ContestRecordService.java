@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRecordDTO;
 import com.github.wuzhudexiaopacai.oj.judge.entity.ContestRecord;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.ContestRecordMapper;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -11,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 比赛成绩服务
@@ -24,6 +27,8 @@ import java.util.List;
 public class ContestRecordService {
 
     private final ContestRecordMapper contestRecordMapper;
+
+    private final JudgeSubmissionMapper judgeSubmissionMapper;
 
     /**
      * 初始化比赛成绩记录（Seata AT 参与方；uk_contest_user 幂等，重复直接成功）
@@ -50,14 +55,21 @@ public class ContestRecordService {
     }
 
     /**
-     * 查询比赛成绩列表
+     * 查询比赛成绩列表（只返回比赛中有提交记录的用户，未参赛的报名者不进入排行榜）
      *
      * @param contestId 比赛 ID
      * @return 成绩列表
      */
     public List<ContestRecordDTO> listByContest(Long contestId) {
+        Set<Long> participants = judgeSubmissionMapper.selectUserIdsByContest(contestId).stream()
+                .collect(Collectors.toSet());
+        if (participants.isEmpty()) {
+            return List.of();
+        }
         List<ContestRecord> records = contestRecordMapper.selectList(
-                new LambdaQueryWrapper<ContestRecord>().eq(ContestRecord::getContestId, contestId));
+                new LambdaQueryWrapper<ContestRecord>()
+                        .eq(ContestRecord::getContestId, contestId)
+                        .in(ContestRecord::getUserId, participants));
         return records.stream().map(r -> {
             ContestRecordDTO dto = new ContestRecordDTO();
             dto.setContestId(r.getContestId());

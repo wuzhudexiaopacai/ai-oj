@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.ContestStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
 import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestPageQueryDTO;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestProblemBindDTO;
@@ -223,6 +224,38 @@ public class ContestServiceImpl implements ContestService {
         contestProblemMapper.insert(contestProblem);
         evictDetailCache(contestId);
         return contestProblem.getId();
+    }
+
+    @Override
+    public ContestRuntimeDTO runtime(Long contestId, Long userId) {
+        Contest contest = contestMapper.selectById(contestId);
+        Asserts.notNull(contest, "比赛不存在");
+        ContestRuntimeDTO dto = new ContestRuntimeDTO();
+        dto.setContestId(contestId);
+        dto.setStatus(contest.getStatus());
+        dto.setType(contest.getType());
+        dto.setStartTimeMillis(toEpochMilli(contest.getStartTime()));
+        dto.setEndTimeMillis(toEpochMilli(contest.getEndTime()));
+        dto.setProblemIds(contestProblemMapper.selectList(new LambdaQueryWrapper<ContestProblem>()
+                        .eq(ContestProblem::getContestId, contestId))
+                .stream()
+                .map(ContestProblem::getProblemId)
+                .toList());
+        if (userId != null) {
+            Long registered = contestRegistrationMapper.selectCount(new LambdaQueryWrapper<ContestRegistration>()
+                    .eq(ContestRegistration::getContestId, contestId)
+                    .eq(ContestRegistration::getUserId, userId)
+                    .eq(ContestRegistration::getStatus, 1));
+            dto.setRegistered(registered != null && registered > 0);
+        }
+        return dto;
+    }
+
+    /**
+     * LocalDateTime → epoch 毫秒（按服务器时区换算，避免跨服务序列化差异）
+     */
+    private Long toEpochMilli(java.time.LocalDateTime time) {
+        return time == null ? null : time.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     /**

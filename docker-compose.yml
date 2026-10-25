@@ -20,6 +20,8 @@ x-app-env: &app-env
   NACOS_ADDR: nacos:8848
   SPRING_CLOUD_NACOS_USERNAME: nacos
   SPRING_CLOUD_NACOS_PASSWORD: nacos
+  # 容器默认 UTC 会让 LocalDateTime.now()/自动时间字段与比赛时间（东八区墙钟）错位 8 小时
+  TZ: Asia/Shanghai
 
 services:
   # ======================== 中间件层 ========================
@@ -319,7 +321,10 @@ services:
       - nacos
       - mysql
       - redis
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # DashScope 密钥由宿主机 .env 注入（不入库、不提交仓库），Nacos 中仅引用 ${DASHSCOPE_API_KEY}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
     ports:
       - "9006:9006"
     networks:

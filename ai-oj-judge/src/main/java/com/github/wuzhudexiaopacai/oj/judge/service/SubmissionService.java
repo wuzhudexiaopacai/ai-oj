@@ -17,6 +17,7 @@ import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.vo.JudgeProgressVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.SubmissionDetailVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.SubmissionPageVO;
+import com.github.wuzhudexiaopacai.oj.judge.vo.UserProblemStatusVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -117,6 +118,19 @@ public class SubmissionService {
         Asserts.notNull(submission, "提交记录不存在");
         Asserts.isTrue(submission.getUserId().equals(userId), "无权查看该提交");
         return detail(submission.getId());
+    }
+
+    /**
+     * 当前用户的题目做题状态（题库列表标记用）
+     *
+     * @return 已通过 / 提交过 的题目 ID
+     */
+    public UserProblemStatusVO userProblemStatus() {
+        Long userId = SecurityUtils.requireLogin().getId();
+        UserProblemStatusVO vo = new UserProblemStatusVO();
+        vo.setSolvedIds(judgeSubmissionMapper.selectSolvedProblemIds(userId));
+        vo.setAttemptedIds(judgeSubmissionMapper.selectAttemptedProblemIds(userId));
+        return vo;
     }
 
     /**

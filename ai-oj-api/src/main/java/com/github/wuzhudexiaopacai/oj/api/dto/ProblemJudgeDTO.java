@@ -21,6 +21,21 @@ public class ProblemJudgeDTO implements Serializable {
     private String title;
 
     /**
+     * 题目描述（Markdown，供 AI 助手理解题意）
+     */
+    private String description;
+
+    /**
+     * 输入说明
+     */
+    private String inputDesc;
+
+    /**
+     * 输出说明
+     */
+    private String outputDesc;
+
+    /**
      * 时间限制（毫秒）
      */
     private Integer timeLimit;

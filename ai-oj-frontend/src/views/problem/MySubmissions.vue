@@ -74,6 +74,15 @@ async function load() {
 }
 
 onMounted(load)
+
+/** 回到第一页重新拉取（最新提交总在第一页） */
+function refresh() {
+  pageNum.value = 1
+  return load()
+}
+
+// 暴露给父组件：提交成功/评测结束后主动刷新，无需整页刷新
+defineExpose({ refresh })
 </script>
 
 <style scoped>

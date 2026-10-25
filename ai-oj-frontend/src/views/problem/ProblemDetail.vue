@@ -37,7 +37,7 @@
                 </template>
               </el-tab-pane>
               <el-tab-pane label="提交记录" name="submissions">
-                <MySubmissions :problem-id="problem.id" />
+                <MySubmissions ref="submissionsRef" :problem-id="problem.id" />
               </el-tab-pane>
             </el-tabs>
           </template>
@@ -124,6 +124,7 @@ const editorHeight = Math.max(320, Math.floor(window.innerHeight * 0.55))
 const submitting = ref(false)
 const result = ref(null)
 const aiVisible = ref(false)
+const submissionsRef = ref(null)
 
 let pollTimer = null
 
@@ -175,6 +176,8 @@ async function onSubmit() {
       code: code.value
     })
     ElMessage.success('提交成功，评测中…')
+    // 提交成功后立即刷新提交记录列表，无需用户手动刷新页面
+    submissionsRef.value?.refresh()
     pollResult(submitId)
   } catch {
     submitting.value = false
@@ -192,6 +195,8 @@ function pollResult(submitId) {
         pollResult(submitId)
       } else {
         submitting.value = false
+        // 出终态后同步列表里的状态/耗时，避免列表仍显示「评测中」
+        submissionsRef.value?.refresh()
       }
     } catch {
       submitting.value = false

@@ -175,6 +175,11 @@ impl DockerManager {
         while let Some(item) = stream.next().await {
             match item {
                 Ok(resp) => return Ok(resp.status_code),
+                // bollard 会把「非 0 退出码」当作 wait 错误返回，但 code 即真实退出码：
+                // 编译失败 / 运行期异常 / timeout 124 都属于这种情况，必须还原为正常结果
+                Err(bollard::errors::Error::DockerContainerWaitError { code, .. }) => {
+                    return Ok(code)
+                }
                 Err(e) => return Err(SandboxError::Docker(e)),
             }
         }

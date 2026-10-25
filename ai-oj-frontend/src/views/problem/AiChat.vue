@@ -82,6 +82,9 @@ async function ask(scene, question) {
   await streamChat({
     sessionId,
     question,
+    // 实时上报当前代码：用户改完代码再追问，AI 看到的是最新版本
+    code: props.code,
+    language: props.language,
     onToken: (token) => {
       messages.value[index].content += token
       scrollToBottom()

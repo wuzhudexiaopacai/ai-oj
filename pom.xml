@@ -35,6 +35,9 @@
         <spring-cloud.version>2023.0.5</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.3.3</spring-cloud-alibaba.version>
         <spring-ai.version>1.0.0</spring-ai.version>
+        <!-- Spring AI Alibaba 1.0.x 线：与 Spring AI 1.0.0 / Spring Boot 3.4.x 兼容，
+             在 Boot 3.3.x 上可正常运行；1.1.x 需 Boot 3.5.x，故此处锁定 1.0.0.4 -->
+        <spring-ai-alibaba.version>1.0.0.4</spring-ai-alibaba.version>
 
         <!-- 组件版本 -->
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
@@ -81,6 +84,12 @@
                 <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Spring AI Alibaba DashScope 接入（通义千问原生协议，非 OpenAI 兼容层） -->
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+                <version>${spring-ai-alibaba.version}</version>
             </dependency>
 
             <!-- MyBatis-Plus（3.5.7 内置 jsqlparser，分页插件开箱即用） -->

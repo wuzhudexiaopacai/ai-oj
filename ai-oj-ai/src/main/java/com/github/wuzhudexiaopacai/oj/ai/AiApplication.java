@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.ai;
 
+import com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeChatAutoConfiguration;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -16,7 +17,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @EnableAsync
 @EnableScheduling
-@SpringBootApplication
+// 关闭 DashScope 自动装配：模型由 AiConfig 手动构建并支持 Nacos 热更新
+@SpringBootApplication(exclude = DashScopeChatAutoConfiguration.class)
 @EnableDiscoveryClient
 @MapperScan("com.github.wuzhudexiaopacai.oj.ai.mapper")
 @EnableFeignClients(basePackages = "com.github.wuzhudexiaopacai.oj.api.feign")

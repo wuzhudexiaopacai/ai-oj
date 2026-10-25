@@ -55,12 +55,15 @@
             <el-tab-pane label="排行榜" name="rank">
               <el-table v-loading="rankLoading" :data="rank">
                 <el-table-column label="排名" prop="rank" width="80" align="center" />
-                <el-table-column label="用户" prop="username" min-width="160" />
-                <el-table-column label="总分" prop="score" width="100" align="center" />
-                <el-table-column label="通过数" prop="acceptCount" width="100" align="center" />
-                <el-table-column label="罚时" width="120" align="center">
+                <el-table-column label="用户" min-width="160">
+                  <template #default="{ row }">{{ row.nickname || row.username || '用户 #' + row.userId }}</template>
+                </el-table-column>
+                <!-- OI 看总分；ACM 看通过数与罚时（后端 totalScore 在 ACM 下恒为 0，不展示避免误解） -->
+                <el-table-column v-if="contest.type === 1" label="总分" prop="totalScore" width="100" align="center" />
+                <el-table-column v-else label="通过数" prop="acceptCount" width="100" align="center" />
+                <el-table-column v-if="contest.type !== 1" label="罚时" width="120" align="center">
                   <template #default="{ row }">
-                    <span class="oj-muted">{{ row.penalty != null ? row.penalty + ' 分钟' : '-' }}</span>
+                    <span class="oj-muted">{{ formatPenalty(row.penaltySeconds) }}</span>
                   </template>
                 </el-table-column>
                 <template #empty>
@@ -117,6 +120,14 @@ async function loadRank() {
   } finally {
     rankLoading.value = false
   }
+}
+
+/** 罚时（秒）→ 可读文本；未参赛/无 AC 显示 - */
+function formatPenalty(seconds) {
+  if (seconds == null || seconds <= 0) return seconds === 0 ? '0 分' : '-'
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  return minutes > 0 ? `${minutes} 分 ${rest} 秒` : `${rest} 秒`
 }
 
 async function onRegister() {

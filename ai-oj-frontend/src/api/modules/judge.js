@@ -18,3 +18,11 @@ export function getSubmission(submitId) {
 export function pageSubmissions(params) {
   return request.get('/submission/page', { params })
 }
+
+/**
+ * 当前用户的题目做题状态（题库列表标记「已通过 / 尝试过」）
+ * 返回 { solvedIds: string[], attemptedIds: string[] }
+ */
+export function getUserProblemStatus() {
+  return request.get('/submission/user-problem-status')
+}

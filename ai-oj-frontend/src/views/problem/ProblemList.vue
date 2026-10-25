@@ -30,9 +30,15 @@
 
       <div class="oj-card table-card">
         <el-table v-loading="loading" :data="list" @row-click="goDetail">
-          <el-table-column label="状态" width="70" align="center">
+          <el-table-column label="状态" width="92" align="center">
             <template #default="{ row }">
-              <el-icon v-if="row.solved" color="var(--oj-success)"><CircleCheckFilled /></el-icon>
+              <el-tooltip v-if="isSolved(row)" content="已通过" placement="top">
+                <el-icon color="var(--oj-success)" :size="18"><CircleCheckFilled /></el-icon>
+              </el-tooltip>
+              <el-tag v-else-if="isAttempted(row)" size="small" type="warning" effect="plain" round>
+                尝试过
+              </el-tag>
+              <span v-else class="oj-muted">—</span>
             </template>
           </el-table-column>
           <el-table-column label="题号" prop="problemKey" width="110" />
@@ -79,14 +85,23 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Search, CircleCheckFilled } from '@element-plus/icons-vue'
 import { pageProblems } from '@/api/modules/problem'
+import { getUserProblemStatus } from '@/api/modules/judge'
+import { useUserStore } from '@/stores/user'
 import { DIFFICULTY } from '@/utils/oj'
 import { formatRate } from '@/utils/format'
 import DifficultyTag from '@/components/DifficultyTag.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
 const loading = ref(false)
 const list = ref([])
 const total = ref(0)
+
+// 当前用户做题状态（ID 为字符串，雪花 ID 不能转 Number）
+const solvedIds = ref(new Set())
+const attemptedIds = ref(new Set())
+const isSolved = (row) => solvedIds.value.has(String(row.id))
+const isAttempted = (row) => attemptedIds.value.has(String(row.id))
 
 const query = reactive({
   pageNum: 1,
@@ -116,7 +131,26 @@ function goDetail(row) {
   router.push(`/problem/${row.id}`)
 }
 
-onMounted(() => load())
+/**
+ * 加载当前用户做题状态（未登录跳过；失败静默，不影响题库浏览）
+ */
+async function loadStatus() {
+  if (!userStore.isLogin) {
+    return
+  }
+  try {
+    const data = await getUserProblemStatus()
+    solvedIds.value = new Set((data.solvedIds || []).map(String))
+    attemptedIds.value = new Set((data.attemptedIds || []).map(String))
+  } catch (e) {
+    // 状态标记属于增强信息，加载失败时保持默认「—」
+  }
+}
+
+onMounted(() => {
+  load()
+  loadStatus()
+})
 </script>
 
 <style scoped>

@@ -27,6 +27,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
@@ -49,6 +50,21 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class AiChatServiceImpl implements AiChatService {
 
+    /**
+     * 代码片段最大字符数（超出截断，防止占满模型上下文）
+     */
+    private static final int MAX_CODE_CHARS = 8000;
+
+    /**
+     * 题面单项最大字符数
+     */
+    private static final int MAX_PROBLEM_CHARS = 4000;
+
+    /**
+     * 语言名最大长度
+     */
+    private static final int MAX_LANGUAGE_CHARS = 20;
+
     private final ChatClient chatClient;
 
     private final AiSessionService sessionService;
@@ -64,7 +80,7 @@ public class AiChatServiceImpl implements AiChatService {
     private final AiProperties aiProperties;
 
     @Override
-    public SseEmitter streamChat(Long sessionId, String question) {
+    public SseEmitter streamChat(Long sessionId, String question, String code, String language) {
         LoginUser loginUser = SecurityUtils.requireLogin();
         Asserts.notBlank(question, "问题不能为空");
 
@@ -73,10 +89,10 @@ public class AiChatServiceImpl implements AiChatService {
         rateLimiter.trySetRate(RateType.OVERALL, aiProperties.getRateLimitPerMinute(), 1, RateIntervalUnit.MINUTES);
         Asserts.isTrue(rateLimiter.tryAcquire(), "请求过于频繁，请稍后再试");
 
-        // 2. 会话归属校验 + 场景策略渲染提示词
+        // 2. 会话归属校验 + 场景策略渲染提示词（注入题目与当前代码上下文）
         AiSession session = sessionService.requireOwnedSession(sessionId);
         String prompt = strategyFactory.getStrategy(session.getScene())
-                .buildPrompt(buildSceneVars(session, question));
+                .buildPrompt(buildSceneVars(session, question, code, language));
 
         // 3. 装配消息：历史记忆 + 当前问题
         List<Message> messages = new ArrayList<>(loadMemory(sessionId));
@@ -145,35 +161,84 @@ public class AiChatServiceImpl implements AiChatService {
     }
 
     /**
-     * 构建场景模板变量（hint 场景通过 Feign 加载题目上下文，失败降级）
+     * 构建场景模板变量（注入题目全文与用户当前代码，Feign 失败降级不阻塞主链路）
      */
-    private Map<String, String> buildSceneVars(AiSession session, String question) {
+    private Map<String, String> buildSceneVars(AiSession session, String question, String code, String language) {
         Map<String, String> vars = new HashMap<>();
         vars.put("question", question);
-        if (AiConstants.SCENE_HINT.equals(session.getScene())) {
-            vars.put("problem", loadProblemContext(session.getProblemId()));
-        }
+        // chat/hint 场景都携带题目上下文，AI 才能"记住"用户正在做的题
+        vars.put("problem", loadProblemContext(session.getProblemId()));
+        // 每次提问实时上报当前编辑器代码，用户改动代码后追问也能被理解
+        vars.put("code", buildCodeContext(code, language));
+        vars.put("language", truncate(StringUtils.hasText(language) ? language : "", MAX_LANGUAGE_CHARS));
         return vars;
     }
 
     /**
-     * 加载题目上下文（Feign 调用失败时降级为题目 ID，不阻塞主链路）
+     * 加载题目上下文（含题面全文，Redis 缓存 30 分钟，避免每次提问都走 Feign）
      */
     private String loadProblemContext(Long problemId) {
         if (problemId == null) {
             return "（未关联具体题目）";
         }
+        String cacheKey = RedisKeys.AI_PROBLEM_CONTEXT + problemId;
+        Object cached = redisTemplate.opsForValue().get(cacheKey);
+        if (cached instanceof String text) {
+            return text;
+        }
         try {
             Result<ProblemJudgeDTO> result = problemFeignClient.getJudgeInfo(problemId);
             if (result != null && result.isSuccess() && result.getData() != null) {
-                ProblemJudgeDTO problem = result.getData();
-                return "题号 " + problem.getProblemKey() + "《" + problem.getTitle() + "》"
-                        + "（时间限制 " + problem.getTimeLimit() + "ms，内存限制 " + problem.getMemoryLimit() + "MB）";
+                String text = formatProblem(result.getData());
+                redisTemplate.opsForValue().set(cacheKey, text, 30, TimeUnit.MINUTES);
+                return text;
             }
         } catch (Exception e) {
             log.warn("题目上下文加载失败，降级处理: problemId={}", problemId, e);
         }
         return "题目 ID " + problemId;
+    }
+
+    /**
+     * 题目信息格式化为提示词片段
+     */
+    private String formatProblem(ProblemJudgeDTO problem) {
+        StringBuilder sb = new StringBuilder("\n\n【当前题目】\n");
+        sb.append("题号：").append(problem.getProblemKey()).append(" 标题：").append(problem.getTitle()).append("\n");
+        sb.append("时间限制：").append(problem.getTimeLimit()).append("ms，内存限制：")
+                .append(problem.getMemoryLimit()).append("MB\n");
+        if (StringUtils.hasText(problem.getDescription())) {
+            sb.append("题目描述：\n").append(truncate(problem.getDescription(), MAX_PROBLEM_CHARS)).append("\n");
+        }
+        if (StringUtils.hasText(problem.getInputDesc())) {
+            sb.append("输入说明：\n").append(truncate(problem.getInputDesc(), MAX_PROBLEM_CHARS)).append("\n");
+        }
+        if (StringUtils.hasText(problem.getOutputDesc())) {
+            sb.append("输出说明：\n").append(truncate(problem.getOutputDesc(), MAX_PROBLEM_CHARS)).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 用户当前代码格式化为提示词片段（空代码则完全不注入）
+     */
+    private String buildCodeContext(String code, String language) {
+        if (!StringUtils.hasText(code)) {
+            return "";
+        }
+        String lang = StringUtils.hasText(language) ? language : "";
+        String label = lang.isEmpty() ? "用户当前代码" : "用户当前代码（" + lang + "）";
+        return "\n\n【" + label + "】\n```" + lang + "\n" + truncate(code, MAX_CODE_CHARS) + "\n```\n";
+    }
+
+    /**
+     * 超长内容截断，防止提示词超出模型上下文窗口
+     */
+    private String truncate(String text, int maxChars) {
+        if (text == null || text.length() <= maxChars) {
+            return text == null ? "" : text;
+        }
+        return text.substring(0, maxChars) + "\n…（内容过长已截断）";
     }
 
     /**

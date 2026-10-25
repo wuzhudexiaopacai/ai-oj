@@ -5,6 +5,7 @@ import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.judge.service.SubmissionService;
 import com.github.wuzhudexiaopacai.oj.judge.vo.SubmissionDetailVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.SubmissionPageVO;
+import com.github.wuzhudexiaopacai.oj.judge.vo.UserProblemStatusVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,15 @@ public class SubmissionController {
                                                      @RequestParam(value = "problemId", required = false) Long problemId,
                                                      @RequestParam(value = "status", required = false) Integer status) {
         return Result.ok(submissionService.page(pageNum, pageSize, problemId, status));
+    }
+
+    /**
+     * 当前用户的题目做题状态（题库列表标记「已通过 / 尝试过」）
+     */
+    @Operation(summary = "当前用户题目做题状态")
+    @GetMapping("/user-problem-status")
+    public Result<UserProblemStatusVO> userProblemStatus() {
+        return Result.ok(submissionService.userProblemStatus());
     }
 
     /**
