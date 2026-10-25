@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.api.feign;
 
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestProblemStatusDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRecordDTO;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -39,4 +40,15 @@ public interface JudgeFeignClient {
      */
     @GetMapping("/contest-record/list")
     Result<List<ContestRecordDTO>> listContestRecord(@RequestParam("contestId") Long contestId);
+
+    /**
+     * 查询用户在指定比赛内的题目通过状态（比赛题目列表标记「已通过 / 尝试过」）
+     *
+     * @param contestId 比赛 ID
+     * @param userId    用户 ID
+     * @return 已通过 / 提交过 的题目 ID
+     */
+    @GetMapping("/contest-problem-status")
+    Result<ContestProblemStatusDTO> contestProblemStatus(@RequestParam("contestId") Long contestId,
+                                                         @RequestParam("userId") Long userId);
 }

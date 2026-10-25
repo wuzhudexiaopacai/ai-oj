@@ -8,7 +8,10 @@ import com.github.wuzhudexiaopacai.oj.common.core.enums.ContestStatusEnum;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestEventMessage;
 import com.github.wuzhudexiaopacai.oj.contest.entity.Contest;
 import com.github.wuzhudexiaopacai.oj.contest.mapper.ContestMapper;
+import com.github.wuzhudexiaopacai.oj.contest.service.ContestService;
 import com.github.wuzhudexiaopacai.oj.contest.service.impl.ContestServiceImpl;
+import com.github.wuzhudexiaopacai.oj.contest.vo.ContestTimeVO;
+import com.github.wuzhudexiaopacai.oj.contest.websocket.ContestWsPushService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
@@ -63,6 +66,10 @@ public class ContestStatusScanTask {
     private final RocketMQTemplate rocketMQTemplate;
 
     private final RedisTemplate<String, Object> redisTemplate;
+
+    private final ContestService contestService;
+
+    private final ContestWsPushService wsPushService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -119,6 +126,11 @@ public class ContestStatusScanTask {
             }
             // 状态变更属于写操作，主动失效详情缓存
             redisTemplate.delete(ContestServiceImpl.CONTEST_INFO_CACHE + contest.getId());
+            // 开赛/结束状态迁移实时推送做题页，前端据此切换倒计时阶段与提交可用性
+            ContestTimeVO snapshot = contestService.timeSnapshot(contest.getId());
+            if (snapshot != null) {
+                wsPushService.publish(snapshot);
+            }
             sendContestEvent(eventType, contest);
         }
     }

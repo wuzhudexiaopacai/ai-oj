@@ -37,4 +37,11 @@ public class ContestProblemVO implements Serializable {
      * 排序
      */
     private Integer sort;
+
+    /**
+     * 当前用户在该比赛内的做题状态：AC=已通过，ATTEMPTED=尝试过，为空=未提交
+     * <p>
+     * 按 contestId 独立计算，不含赛前历史提交；未登录时为空。
+     */
+    private String status;
 }

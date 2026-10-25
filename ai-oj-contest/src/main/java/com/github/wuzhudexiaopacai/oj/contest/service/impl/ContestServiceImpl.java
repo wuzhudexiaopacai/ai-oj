@@ -3,8 +3,11 @@ package com.github.wuzhudexiaopacai.oj.contest.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestProblemStatusDTO;
+import com.github.wuzhudexiaopacai.oj.api.feign.JudgeFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.ContestStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
+import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
 import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
@@ -21,7 +24,10 @@ import com.github.wuzhudexiaopacai.oj.contest.service.ContestService;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestDetailVO;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestPageVO;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestProblemVO;
+import com.github.wuzhudexiaopacai.oj.contest.vo.ContestTimeVO;
+import com.github.wuzhudexiaopacai.oj.contest.websocket.ContestWsPushService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -29,8 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -40,6 +48,7 @@ import java.util.stream.Collectors;
  * @author wuzhudexiaopacai
  * @since 1.0
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ContestServiceImpl implements ContestService {
@@ -64,6 +73,16 @@ public class ContestServiceImpl implements ContestService {
      */
     private static final int MAX_PROBLEM_COUNT = 26;
 
+    /**
+     * 比赛题目状态：已通过
+     */
+    private static final String PROBLEM_STATUS_AC = "AC";
+
+    /**
+     * 比赛题目状态：尝试过但未通过
+     */
+    private static final String PROBLEM_STATUS_ATTEMPTED = "ATTEMPTED";
+
     private final ContestMapper contestMapper;
 
     private final ContestProblemMapper contestProblemMapper;
@@ -71,6 +90,10 @@ public class ContestServiceImpl implements ContestService {
     private final RedisTemplate<String, Object> redisTemplate;
 
     private final ContestRegistrationMapper contestRegistrationMapper;
+
+    private final ContestWsPushService wsPushService;
+
+    private final JudgeFeignClient judgeFeignClient;
 
     @Override
     public PageResult<ContestPageVO> page(ContestPageQueryDTO query) {
@@ -113,6 +136,8 @@ public class ContestServiceImpl implements ContestService {
         ContestDetailVO detailVO = loadDetail(id);
         // 报名人数/当前用户报名状态与用户相关，每次请求实时补全（不进入详情缓存）
         fillRegistration(id, detailVO);
+        // 比赛题目做题状态同样与用户相关，按 contestId 独立计算后实时补全
+        fillProblemStatus(id, detailVO);
         return detailVO;
     }
 
@@ -156,6 +181,38 @@ public class ContestServiceImpl implements ContestService {
         detailVO.setRegistered(registered);
     }
 
+    /**
+     * 补全当前用户在该比赛内的题目做题状态（未登录跳过，远程失败降级为空状态）
+     *
+     * @param contestId 比赛 ID
+     * @param detailVO  比赛详情
+     */
+    private void fillProblemStatus(Long contestId, ContestDetailVO detailVO) {
+        Long userId = SecurityUtils.currentUserIdOrNull();
+        if (userId == null || detailVO.getProblems() == null || detailVO.getProblems().isEmpty()) {
+            return;
+        }
+        try {
+            Result<ContestProblemStatusDTO> result = judgeFeignClient.contestProblemStatus(contestId, userId);
+            ContestProblemStatusDTO data = result == null ? null : result.getData();
+            if (data == null) {
+                return;
+            }
+            Set<Long> solved = data.getSolvedIds() == null ? Set.of() : new HashSet<>(data.getSolvedIds());
+            Set<Long> attempted = data.getAttemptedIds() == null ? Set.of() : new HashSet<>(data.getAttemptedIds());
+            detailVO.getProblems().forEach(problem -> {
+                if (solved.contains(problem.getProblemId())) {
+                    problem.setStatus(PROBLEM_STATUS_AC);
+                } else if (attempted.contains(problem.getProblemId())) {
+                    problem.setStatus(PROBLEM_STATUS_ATTEMPTED);
+                }
+            });
+        } catch (Exception e) {
+            // 状态标记属于增强信息，远程失败时保持「未提交」展示，不影响比赛详情主流程
+            log.warn("回填比赛题目做题状态失败 contestId={}", contestId, e);
+        }
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long create(ContestSaveDTO saveDTO) {
@@ -187,6 +244,11 @@ public class ContestServiceImpl implements ContestService {
         contest.setVersion(exist.getVersion());
         contestMapper.updateById(contest);
         evictDetailCache(id);
+        // 时间变更实时推送：正在比赛做题页的用户无需刷新即可同步倒计时（重读保证以落库结果为准）
+        Contest latest = contestMapper.selectById(id);
+        if (latest != null) {
+            wsPushService.publish(toTimeVO(latest));
+        }
     }
 
     @Override
@@ -249,6 +311,26 @@ public class ContestServiceImpl implements ContestService {
             dto.setRegistered(registered != null && registered > 0);
         }
         return dto;
+    }
+
+    @Override
+    public ContestTimeVO timeSnapshot(Long contestId) {
+        Contest contest = contestMapper.selectById(contestId);
+        return contest == null ? null : toTimeVO(contest);
+    }
+
+    /**
+     * 构建比赛时间快照（epoch 毫秒，供前端倒计时与时钟校正）
+     */
+    private ContestTimeVO toTimeVO(Contest contest) {
+        ContestTimeVO vo = new ContestTimeVO();
+        vo.setContestId(contest.getId());
+        vo.setStatus(contest.getStatus());
+        vo.setStartTimeMillis(toEpochMilli(contest.getStartTime()));
+        vo.setEndTimeMillis(toEpochMilli(contest.getEndTime()));
+        vo.setSealTimeMillis(toEpochMilli(contest.getSealTime()));
+        vo.setServerTimeMillis(System.currentTimeMillis());
+        return vo;
     }
 
     /**

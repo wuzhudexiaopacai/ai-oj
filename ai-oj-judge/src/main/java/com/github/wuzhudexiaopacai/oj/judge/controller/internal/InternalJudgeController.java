@@ -1,9 +1,11 @@
 package com.github.wuzhudexiaopacai.oj.judge.controller.internal;
 
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestProblemStatusDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRecordDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.JudgeFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.service.ContestRecordService;
+import com.github.wuzhudexiaopacai.oj.judge.service.SubmissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +26,8 @@ public class InternalJudgeController implements JudgeFeignClient {
 
     private final ContestRecordService contestRecordService;
 
+    private final SubmissionService submissionService;
+
     /**
      * 初始化比赛成绩记录（Seata 分布式事务参与者）
      */
@@ -39,5 +43,13 @@ public class InternalJudgeController implements JudgeFeignClient {
     @Override
     public Result<List<ContestRecordDTO>> listContestRecord(Long contestId) {
         return Result.ok(contestRecordService.listByContest(contestId));
+    }
+
+    /**
+     * 查询用户在指定比赛内的题目通过状态（比赛题目列表标记「已通过 / 尝试过」）
+     */
+    @Override
+    public Result<ContestProblemStatusDTO> contestProblemStatus(Long contestId, Long userId) {
+        return Result.ok(submissionService.contestProblemStatus(contestId, userId));
     }
 }

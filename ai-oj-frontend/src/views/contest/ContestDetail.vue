@@ -33,12 +33,23 @@
             <el-tab-pane label="题目列表" name="problems">
               <!-- 题目列表随比赛详情一起返回，无需额外请求 -->
               <el-table :data="contest.problems || []">
+                <el-table-column label="状态" width="92" align="center">
+                  <template #default="{ row }">
+                    <el-tooltip v-if="row.status === 'AC'" content="已通过" placement="top">
+                      <el-icon color="var(--oj-success)" :size="18"><CircleCheckFilled /></el-icon>
+                    </el-tooltip>
+                    <el-tag v-else-if="row.status === 'ATTEMPTED'" size="small" type="warning" effect="plain" round>
+                      尝试过
+                    </el-tag>
+                    <span v-else class="oj-muted">—</span>
+                  </template>
+                </el-table-column>
                 <el-table-column label="题号" width="80" align="center">
                   <template #default="{ row }">{{ row.displayId || row.sort + 1 }}</template>
                 </el-table-column>
                 <el-table-column label="题目" min-width="260">
                   <template #default="{ row }">
-                    <router-link class="link" :to="`/problem/${row.problemId}?contestId=${contest.id}`">
+                    <router-link class="link" :to="`/contest/${contest.id}/problem/${row.problemId}`">
                       {{ row.title || '题目 #' + row.problemId }}
                     </router-link>
                   </template>
@@ -83,6 +94,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { getContestDetail, registerContest, getContestRank } from '@/api/modules/contest'
 import { formatTime } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
@@ -94,7 +106,8 @@ const contestId = route.params.id
 
 const loading = ref(false)
 const contest = ref(null)
-const tab = ref('desc')
+// 支持从比赛做题页「返回比赛题目」直接落到题目列表页签
+const tab = ref(route.query.tab === 'problems' ? 'problems' : 'desc')
 const registering = ref(false)
 // 报名状态：优先取后端返回的 registered，报名成功后本地置为 true
 const registered = ref(false)

@@ -12,6 +12,8 @@ const routes = [
       { path: 'submission', name: 'submission-list', component: () => import('@/views/submission/SubmissionList.vue'), meta: { title: '提交记录', requiresAuth: true } },
       { path: 'contest', name: 'contest-list', component: () => import('@/views/contest/ContestList.vue'), meta: { title: '比赛' } },
       { path: 'contest/:id', name: 'contest-detail', component: () => import('@/views/contest/ContestDetail.vue'), meta: { title: '比赛详情' } },
+      // 比赛做题页：无 AI 助手，带赛内倒计时与返回比赛入口
+      { path: 'contest/:contestId/problem/:problemId', name: 'contest-problem', component: () => import('@/views/contest/ContestProblem.vue'), meta: { title: '比赛做题' } },
       {
         path: 'user/profile',
         name: 'user-profile',

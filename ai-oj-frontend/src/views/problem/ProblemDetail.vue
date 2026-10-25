@@ -220,24 +220,32 @@ watch(
 
 <style scoped>
 .problem-page {
+  display: flex;
+  flex-direction: column;
+  /* 固定为视口内高度：左右两栏各自内部滚动，宽屏/窄屏下代码编辑器宽度都能自适应 */
+  height: calc(100vh - 104px);
   padding: 16px;
 }
 
 .split {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 16px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .pane-left {
   flex: 0 0 46%;
-  max-height: calc(100vh - 120px);
+  height: 100%;
   overflow: auto;
 }
 
 .pane-right {
   flex: 1;
   min-width: 0;
+  height: 100%;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -342,6 +350,10 @@ watch(
 }
 
 @media (max-width: 960px) {
+  .problem-page {
+    height: auto;
+  }
+
   .split {
     flex-direction: column;
   }
@@ -349,7 +361,13 @@ watch(
   .pane-left {
     flex: none;
     width: 100%;
+    height: auto;
     max-height: none;
+  }
+
+  .pane-right {
+    height: auto;
+    overflow: visible;
   }
 }
 </style>

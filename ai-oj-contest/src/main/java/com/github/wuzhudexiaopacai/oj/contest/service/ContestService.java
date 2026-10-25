@@ -7,6 +7,7 @@ import com.github.wuzhudexiaopacai.oj.contest.dto.ContestProblemBindDTO;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestSaveDTO;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestDetailVO;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestPageVO;
+import com.github.wuzhudexiaopacai.oj.contest.vo.ContestTimeVO;
 
 /**
  * 比赛服务
@@ -72,4 +73,12 @@ public interface ContestService {
      * @return 运行时信息
      */
     ContestRuntimeDTO runtime(Long contestId, Long userId);
+
+    /**
+     * 比赛时间快照（WebSocket 连接建立下发 / 时间变更广播体）
+     *
+     * @param contestId 比赛 ID
+     * @return 时间快照；比赛不存在时返回 null
+     */
+    ContestTimeVO timeSnapshot(Long contestId);
 }

@@ -2,6 +2,7 @@ package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.wuzhudexiaopacai.oj.api.dto.ContestProblemStatusDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemBriefDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
@@ -131,6 +132,22 @@ public class SubmissionService {
         vo.setSolvedIds(judgeSubmissionMapper.selectSolvedProblemIds(userId));
         vo.setAttemptedIds(judgeSubmissionMapper.selectAttemptedProblemIds(userId));
         return vo;
+    }
+
+    /**
+     * 用户在指定比赛内的题目通过状态（比赛题目列表标记用）
+     * <p>
+     * 仅统计携带该 contestId 的提交，赛前历史提交不计入。
+     *
+     * @param contestId 比赛 ID
+     * @param userId    用户 ID
+     * @return 已通过 / 提交过 的题目 ID
+     */
+    public ContestProblemStatusDTO contestProblemStatus(Long contestId, Long userId) {
+        ContestProblemStatusDTO dto = new ContestProblemStatusDTO();
+        dto.setSolvedIds(judgeSubmissionMapper.selectSolvedProblemIdsByContest(contestId, userId));
+        dto.setAttemptedIds(judgeSubmissionMapper.selectAttemptedProblemIdsByContest(contestId, userId));
+        return dto;
     }
 
     /**
