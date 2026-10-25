@@ -274,7 +274,7 @@ async function load(resetPage) {
     if (query.status !== null && query.status !== undefined && query.status !== '') params.status = query.status
     const data = await pageRoles(params)
     list.value = data.records || []
-    total.value = data.total || 0
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }

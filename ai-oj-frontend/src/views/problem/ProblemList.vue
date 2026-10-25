@@ -64,15 +64,19 @@
         </el-table>
 
         <div class="pager">
+          <!-- 每页条数单独用下拉控制，分页器只保留基础布局，避免带 sizes 布局在生产构建下不渲染 -->
+          <el-select v-model="query.pageSize" class="page-size" @change="load(1)">
+            <el-option :value="10" label="10 条/页" />
+            <el-option :value="20" label="20 条/页" />
+            <el-option :value="50" label="50 条/页" />
+          </el-select>
           <el-pagination
             v-model:current-page="query.pageNum"
-            v-model:page-size="query.pageSize"
+            :page-size="query.pageSize"
             :total="total"
-            :page-sizes="[10, 20, 50]"
-            layout="total, sizes, prev, pager, next, jumper"
+            layout="total, prev, pager, next"
             background
             @current-change="load()"
-            @size-change="load(1)"
           />
         </div>
       </div>
@@ -105,7 +109,7 @@ const isAttempted = (row) => attemptedIds.value.has(String(row.id))
 
 const query = reactive({
   pageNum: 1,
-  pageSize: 20,
+  pageSize: 10,
   keyword: '',
   difficulty: null
 })
@@ -121,7 +125,8 @@ async function load(resetPage) {
     }
     const data = await pageProblems(params)
     list.value = data.records || []
-    total.value = data.total || 0
+    // 后端 Long 会序列化成字符串，el-pagination 的 total 必须是 number
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }
@@ -175,6 +180,12 @@ onMounted(() => {
 .pager {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
   margin-top: 16px;
+}
+
+.page-size {
+  width: 110px;
 }
 </style>

@@ -31,8 +31,8 @@
             </el-tab-pane>
 
             <el-tab-pane label="题目列表" name="problems">
-              <!-- 题目列表随比赛详情一起返回，无需额外请求 -->
-              <el-table :data="contest.problems || []">
+              <!-- 题目列表随比赛详情一起返回，此处前端分页展示 -->
+              <el-table :data="pagedProblems">
                 <el-table-column label="状态" width="92" align="center">
                   <template #default="{ row }">
                     <el-tooltip v-if="row.status === 'AC'" content="已通过" placement="top">
@@ -61,6 +61,16 @@
                   <el-empty description="暂无题目" :image-size="60" />
                 </template>
               </el-table>
+              <!-- 有题目就展示分页器，避免题量不足一页时看起来像没有分页 -->
+              <div v-if="problemTotal > 0" class="table-pager">
+                <el-pagination
+                  v-model:current-page="problemPage"
+                  :page-size="problemPageSize"
+                  :total="problemTotal"
+                  layout="total, prev, pager, next"
+                  background
+                />
+              </div>
             </el-tab-pane>
 
             <el-tab-pane label="排行榜" name="rank">
@@ -91,7 +101,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { CircleCheckFilled } from '@element-plus/icons-vue'
@@ -115,11 +125,22 @@ const registered = ref(false)
 const rank = ref([])
 const rankLoading = ref(false)
 
+/** 题目列表前端分页：题目随比赛详情一次性返回 */
+const problemPage = ref(1)
+const problemPageSize = 10
+const problemTotal = computed(() => (contest.value?.problems || []).length)
+const pagedProblems = computed(() => {
+  const all = contest.value?.problems || []
+  const start = (problemPage.value - 1) * problemPageSize
+  return all.slice(start, start + problemPageSize)
+})
+
 async function load() {
   loading.value = true
   try {
     contest.value = await getContestDetail(contestId)
     registered.value = !!contest.value.registered
+    problemPage.value = 1
   } finally {
     loading.value = false
   }
@@ -187,5 +208,11 @@ onMounted(load)
 
 .link:hover {
   color: var(--oj-primary);
+}
+
+.table-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 </style>

@@ -1,5 +1,6 @@
 <template>
   <div v-loading="loading">
+    <SubmissionFilter size="small" @search="onFilterSearch" />
     <el-table :data="list" size="small">
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
@@ -23,12 +24,12 @@
         <el-empty description="暂无提交记录" :image-size="60" />
       </template>
     </el-table>
-    <div v-if="total > pageSize" class="pager">
+    <div v-if="total > 0" class="pager">
       <el-pagination
         v-model:current-page="pageNum"
         :total="total"
         :page-size="pageSize"
-        layout="prev, pager, next"
+        layout="total, prev, pager, next"
         background
         small
         @current-change="load()"
@@ -44,6 +45,7 @@ import { languageOf } from '@/utils/oj'
 import { formatTime } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
+import SubmissionFilter from '@/components/SubmissionFilter.vue'
 
 const props = defineProps({
   problemId: { type: [Number, String], default: null }
@@ -55,6 +57,8 @@ const list = ref([])
 const total = ref(0)
 const pageNum = ref(1)
 const pageSize = 10
+/** 筛选条件（状态 / 语言 / 时间范围 / 关键字），由 SubmissionFilter 组件回传 */
+const filters = ref({})
 
 async function load() {
   // 未登录不请求：该接口按登录用户过滤，匿名访问会触发 401 跳转登录
@@ -63,14 +67,22 @@ async function load() {
   }
   loading.value = true
   try {
-    const params = { pageNum: pageNum.value, pageSize, mine: true }
+    const params = { pageNum: pageNum.value, pageSize, ...filters.value }
     if (props.problemId) params.problemId = props.problemId
     const data = await pageSubmissions(params)
     list.value = data.records || []
-    total.value = data.total || 0
+    // 后端 Long 会序列化成字符串，el-pagination 的 total 必须是 number
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }
+}
+
+/** 筛选条件变化：回到第一页重新查询 */
+function onFilterSearch(params) {
+  filters.value = params
+  pageNum.value = 1
+  load()
 }
 
 onMounted(load)

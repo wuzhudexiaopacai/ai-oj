@@ -25,7 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -63,17 +65,49 @@ public class SubmissionService {
      * @param pageSize  页大小
      * @param problemId 题目 ID（可选）
      * @param status    状态（可选）
+     * @param language  编程语言（可选）
+     * @param keyword   关键字（可选，匹配提交标识或题号/标题）
+     * @param startTime 提交时间下界（可选）
+     * @param endTime   提交时间上界（可选）
      * @return 分页结果
      */
-    public PageResult<SubmissionPageVO> page(long pageNum, long pageSize, Long problemId, Integer status) {
+    public PageResult<SubmissionPageVO> page(long pageNum, long pageSize, Long problemId, Integer status,
+                                             String language, String keyword,
+                                             LocalDateTime startTime, LocalDateTime endTime) {
         Long userId = SecurityUtils.requireLogin().getId();
-        Page<JudgeSubmission> page = judgeSubmissionMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<JudgeSubmission>()
-                        .eq(JudgeSubmission::getUserId, userId)
-                        .eq(problemId != null, JudgeSubmission::getProblemId, problemId)
-                        .eq(status != null, JudgeSubmission::getStatus, status)
-                        .orderByDesc(JudgeSubmission::getId));
+        LambdaQueryWrapper<JudgeSubmission> wrapper = new LambdaQueryWrapper<JudgeSubmission>()
+                .eq(JudgeSubmission::getUserId, userId)
+                .eq(problemId != null, JudgeSubmission::getProblemId, problemId)
+                .eq(status != null, JudgeSubmission::getStatus, status)
+                .eq(StringUtils.hasText(language), JudgeSubmission::getLanguage, language)
+                .ge(startTime != null, JudgeSubmission::getCreateTime, startTime)
+                .le(endTime != null, JudgeSubmission::getCreateTime, endTime)
+                .orderByDesc(JudgeSubmission::getId);
+        if (StringUtils.hasText(keyword)) {
+            List<Long> problemIds = searchProblemIds(keyword);
+            wrapper.and(w -> {
+                w.like(JudgeSubmission::getSubmitId, keyword);
+                if (!problemIds.isEmpty()) {
+                    w.or().in(JudgeSubmission::getProblemId, problemIds);
+                }
+            });
+        }
+        Page<JudgeSubmission> page = judgeSubmissionMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
         return PageResult.of(page, this::toPageVO);
+    }
+
+    /**
+     * 按关键字检索题目 ID（题号/标题），供提交记录关键字筛选使用
+     */
+    private List<Long> searchProblemIds(String keyword) {
+        try {
+            Result<List<Long>> result = problemFeignClient.searchIds(keyword);
+            List<Long> ids = result == null ? null : result.getData();
+            return ids == null ? List.of() : ids;
+        } catch (Exception e) {
+            log.warn("按关键字检索题目失败 keyword={}", keyword, e);
+            return List.of();
+        }
     }
 
     /**

@@ -173,7 +173,7 @@
           title="赛中题号按添加顺序自动生成 A / B / C…"
           class="bind-tip"
         />
-        <el-table :data="contestProblems" v-loading="problemsLoading">
+        <el-table :data="pagedContestProblems" v-loading="problemsLoading">
           <el-table-column label="题号" prop="displayId" width="70" align="center">
             <template #default="{ row }">
               <el-tag effect="dark" size="small">{{ row.displayId }}</el-tag>
@@ -187,13 +187,24 @@
             <el-empty description="尚未绑定题目" :image-size="60" />
           </template>
         </el-table>
+        <!-- 有题目就展示分页器，避免题量不足一页时看起来像没有分页 -->
+        <div v-if="contestProblems.length > 0" class="problem-pager">
+          <el-pagination
+            v-model:current-page="contestProblemPage"
+            :page-size="contestProblemPageSize"
+            :total="contestProblems.length"
+            layout="total, prev, pager, next"
+            background
+            small
+          />
+        </div>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import {
@@ -227,7 +238,7 @@ async function load(resetPage) {
     if (query.type !== null && query.type !== undefined && query.type !== '') params.type = query.type
     const data = await pageContests(params)
     list.value = data.records || []
-    total.value = data.total || 0
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }
@@ -316,6 +327,13 @@ async function remove(row) {
 const problemVisible = ref(false)
 const currentContest = ref(null)
 const contestProblems = ref([])
+/** 已绑定题目前端分页（题目随比赛详情一次性返回） */
+const contestProblemPage = ref(1)
+const contestProblemPageSize = 10
+const pagedContestProblems = computed(() => {
+  const start = (contestProblemPage.value - 1) * contestProblemPageSize
+  return contestProblems.value.slice(start, start + contestProblemPageSize)
+})
 const problemsLoading = ref(false)
 const problemOptions = ref([])
 const problemSearching = ref(false)
@@ -328,6 +346,7 @@ async function openProblems(row) {
   bindForm.problem = null
   bindForm.title = ''
   bindForm.score = 100
+  contestProblemPage.value = 1
   await loadContestProblems()
   searchProblems('')
 }
@@ -370,6 +389,8 @@ async function bindProblem() {
     bindForm.problem = null
     bindForm.title = ''
     await loadContestProblems()
+    // 新题目追加在末尾，翻到最后一页让管理员看到结果
+    contestProblemPage.value = Math.max(1, Math.ceil(contestProblems.value.length / contestProblemPageSize))
   } finally {
     binding.value = false
   }
@@ -419,5 +440,11 @@ onMounted(() => load())
 
 .bind-tip {
   margin-bottom: 4px;
+}
+
+.problem-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 </style>

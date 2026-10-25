@@ -126,7 +126,7 @@ async function load(resetPage) {
     }
     const data = await adminPageProblems(params)
     list.value = data.records || []
-    total.value = data.total || 0
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }

@@ -52,14 +52,14 @@ import { formatTime } from '@/utils/format'
 const loading = ref(false)
 const list = ref([])
 const total = ref(0)
-const query = reactive({ pageNum: 1, pageSize: 12 })
+const query = reactive({ pageNum: 1, pageSize: 10 })
 
 async function load() {
   loading.value = true
   try {
     const data = await pageContests({ pageNum: query.pageNum, pageSize: query.pageSize })
     list.value = data.records || []
-    total.value = data.total || 0
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }

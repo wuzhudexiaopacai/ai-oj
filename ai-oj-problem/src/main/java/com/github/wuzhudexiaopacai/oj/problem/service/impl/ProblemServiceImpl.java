@@ -240,16 +240,14 @@ public class ProblemServiceImpl implements ProblemService {
             ids = null;
         }
         List<Problem> problems;
-        if (ids == null) {
+        if (ids == null || ids.isEmpty()) {
+            // ES 不可用或无命中时降级为数据库 LIKE，避免索引未同步导致搜索为空
             problems = problemMapper.selectList(new LambdaQueryWrapper<Problem>()
                     .eq(Problem::getStatus, STATUS_ONLINE)
                     .eq(Problem::getAuth, AUTH_PUBLIC)
                     .and(w -> w.like(Problem::getTitle, keyword).or().like(Problem::getProblemKey, keyword))
                     .last("LIMIT 50"));
         } else {
-            if (ids.isEmpty()) {
-                return Collections.emptyList();
-            }
             problems = problemMapper.selectList(new LambdaQueryWrapper<Problem>()
                     .in(Problem::getId, ids)
                     .eq(Problem::getStatus, STATUS_ONLINE)

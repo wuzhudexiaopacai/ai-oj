@@ -6,13 +6,16 @@
       </div>
 
       <div class="oj-card table-card">
+        <SubmissionFilter @search="onFilterSearch" />
         <el-table
           v-loading="loading"
           :data="list"
+          size="small"
           row-class-name="clickable-row"
           @row-click="openDetail"
         >
-          <el-table-column label="提交 ID" prop="submitId" width="160">
+          <!-- 提交 ID 是 36 位 UUID，列宽留足并禁止换行，避免折成两行把行高撑高 -->
+          <el-table-column label="提交 ID" prop="submitId" width="290">
             <template #default="{ row }">
               <span class="oj-muted mono">{{ row.submitId || row.id }}</span>
             </template>
@@ -57,15 +60,19 @@
         </el-table>
 
         <div class="pager">
+          <!-- 每页条数单独用下拉控制，分页器只保留基础布局，避免带 sizes 布局在生产构建下不渲染 -->
+          <el-select v-model="query.pageSize" class="page-size" @change="load(1)">
+            <el-option :value="10" label="10 条/页" />
+            <el-option :value="20" label="20 条/页" />
+            <el-option :value="50" label="50 条/页" />
+          </el-select>
           <el-pagination
             v-model:current-page="query.pageNum"
-            v-model:page-size="query.pageSize"
+            :page-size="query.pageSize"
             :total="total"
-            :page-sizes="[10, 20, 50]"
-            layout="total, sizes, prev, pager, next, jumper"
+            layout="total, prev, pager, next"
             background
             @current-change="load()"
-            @size-change="load(1)"
           />
         </div>
       </div>
@@ -128,6 +135,7 @@ import { pageSubmissions, getSubmission } from '@/api/modules/judge'
 import { languageOf } from '@/utils/oj'
 import { formatTime, formatMemory } from '@/utils/format'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
+import SubmissionFilter from '@/components/SubmissionFilter.vue'
 
 const loading = ref(false)
 const list = ref([])
@@ -139,8 +147,11 @@ const detail = ref(null)
 
 const query = reactive({
   pageNum: 1,
-  pageSize: 20
+  pageSize: 10
 })
+
+/** 筛选条件（状态 / 语言 / 时间范围 / 关键字），由 SubmissionFilter 组件回传 */
+const filters = ref({})
 
 /** 打开提交详情（按 submitId 查询，含用例明细与编译错误） */
 async function openDetail(row) {
@@ -164,13 +175,21 @@ async function load(resetPage) {
     // 后端 /submission/page 固定查询当前登录用户的提交，无需 mine 参数
     const data = await pageSubmissions({
       pageNum: query.pageNum,
-      pageSize: query.pageSize
+      pageSize: query.pageSize,
+      ...filters.value
     })
     list.value = data.records || []
-    total.value = data.total || 0
+    // 后端 Long 会序列化成字符串，el-pagination 的 total 必须是 number
+    total.value = Number(data.total) || 0
   } finally {
     loading.value = false
   }
+}
+
+/** 筛选条件变化：回到第一页重新查询 */
+function onFilterSearch(params) {
+  filters.value = params
+  load(1)
 }
 
 onMounted(() => load())
@@ -193,12 +212,28 @@ onMounted(() => load())
 .mono {
   font-family: Consolas, Menlo, monospace;
   font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 行内容紧凑一些，避免表格显得空旷 */
+.table-card :deep(.el-table) {
+  font-size: 13px;
+}
+
+.table-card :deep(.el-table .cell) {
+  line-height: 1.4;
 }
 
 .pager {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
   margin-top: 16px;
+}
+
+.page-size {
+  width: 110px;
 }
 
 .clickable-row {
