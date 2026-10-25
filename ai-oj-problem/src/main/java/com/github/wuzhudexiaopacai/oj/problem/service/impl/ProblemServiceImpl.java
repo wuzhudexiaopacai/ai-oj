@@ -181,7 +181,8 @@ public class ProblemServiceImpl implements ProblemService {
     public ProblemDetailVO detail(String problemKey) {
         Asserts.notBlank(problemKey, "题号不能为空");
         // 兼容以题目 ID 访问（前端路由 /problem/{id}）：纯数字视为 ID，先换算成展示题号
-        if (problemKey.length() <= 18 && problemKey.chars().allMatch(Character::isDigit)) {
+        // 雪花 ID 为 19 位，长度上限需覆盖到 19 位，否则新题会被当成题号查不到
+        if (problemKey.length() <= 19 && problemKey.chars().allMatch(Character::isDigit)) {
             Problem problem = problemMapper.selectById(Long.parseLong(problemKey));
             Asserts.notNull(problem, "题目不存在");
             problemKey = problem.getProblemKey();
@@ -449,7 +450,8 @@ public class ProblemServiceImpl implements ProblemService {
      * 保存关联数据（标签/用例/语言模板，整体替换）
      */
     private void saveRelations(Long problemId, ProblemSaveDTO saveDTO) {
-        problemTagMapper.delete(new LambdaQueryWrapper<ProblemTag>().eq(ProblemTag::getProblemId, problemId));
+        // 子表重建用物理删除：逻辑删除的旧行会继续占用唯一键，导致编辑时 Duplicate entry
+        problemTagMapper.deletePhysicalByProblemId(problemId);
         if (CollUtil.isNotEmpty(saveDTO.getTagIds())) {
             for (Long tagId : saveDTO.getTagIds()) {
                 ProblemTag pt = new ProblemTag();
@@ -459,7 +461,7 @@ public class ProblemServiceImpl implements ProblemService {
             }
         }
         if (saveDTO.getTestCases() != null) {
-            testCaseMapper.delete(new LambdaQueryWrapper<TestCase>().eq(TestCase::getProblemId, problemId));
+            testCaseMapper.deletePhysicalByProblemId(problemId);
             for (TestCaseSaveDTO caseDTO : saveDTO.getTestCases()) {
                 TestCase testCase = BeanUtil.copyProperties(caseDTO, TestCase.class, "id");
                 testCase.setId(null);
@@ -468,8 +470,7 @@ public class ProblemServiceImpl implements ProblemService {
             }
         }
         if (saveDTO.getLanguageTemplates() != null) {
-            problemLanguageMapper.delete(new LambdaQueryWrapper<ProblemLanguage>()
-                    .eq(ProblemLanguage::getProblemId, problemId));
+            problemLanguageMapper.deletePhysicalByProblemId(problemId);
             saveDTO.getLanguageTemplates().forEach(t -> {
                 ProblemLanguage language = BeanUtil.copyProperties(t, ProblemLanguage.class);
                 language.setProblemId(problemId);
