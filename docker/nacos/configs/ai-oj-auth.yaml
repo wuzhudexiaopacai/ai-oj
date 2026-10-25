@@ -1,0 +1,14 @@
+# AI-OJ 认证中心
+# @author wuzhudexiaopacai
+server:
+  port: 9001
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://mysql:3306/ai_oj_auth?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5

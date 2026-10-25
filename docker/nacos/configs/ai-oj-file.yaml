@@ -1,0 +1,25 @@
+# AI-OJ 文件服务（MinIO 分片上传）
+# @author wuzhudexiaopacai
+server:
+  port: 9005
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://mysql:3306/ai_oj_file?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+
+ai-oj:
+  file:
+    # 分片大小（字节），默认 5MB（MinIO/S3 协议最小分片）
+    chunk-size: 5242880
+    # 预签名 URL 过期时间（秒）
+    presign-expire-seconds: 600
+    # 未完成分片保留时长（延时消息清理，分钟）
+    chunk-expire-minutes: 30
+    # 延时消息级别（RocketMQ 预设：1s 5s 10s 30s 1m 2m ... 对应 level 1-18）
+    clean-delay-level: 10

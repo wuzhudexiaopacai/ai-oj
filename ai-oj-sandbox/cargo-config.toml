@@ -1,0 +1,9 @@
+# Cargo 国内镜像（rsproxy 字节跳动），加速 Docker 构建期依赖下载
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[net]
+git-fetch-with-cli = true

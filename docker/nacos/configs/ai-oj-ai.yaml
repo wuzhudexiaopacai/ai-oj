@@ -1,0 +1,32 @@
+# AI-OJ 智能服务（Spring AI）
+# @author wuzhudexiaopacai
+server:
+  port: 9006
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://mysql:3306/ai_oj_ai?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+  ai:
+    openai:
+      # 兼容 OpenAI 协议的模型均可接入（DeepSeek / 通义 / Moonshot 等）
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      # 部署时通过环境变量覆盖：SPRING_AI_OPENAI_API_KEY
+      api-key: sk-ws-H.EDMYILL.ykEA.MEUCIQDuAik2TdD2yY4s9eEBNwce6JorIS1iSLNHuy_nj1J1hgIgPexf-pY2FafWW98HqQF_Yd9uvelKFcCy9zT_pcLHqcw
+      chat:
+        options:
+          model: qwen-plus
+          temperature: 0.7
+          max-tokens: 2048
+
+ai-oj:
+  ai:
+    # 每用户每分钟 AI 调用限流（Redisson RateLimiter）
+    rate-limit-per-minute: 10
+    # 会话记忆最大轮数（超出截断）
+    max-memory-rounds: 20

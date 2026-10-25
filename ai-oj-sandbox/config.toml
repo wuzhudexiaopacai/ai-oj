@@ -1,0 +1,21 @@
+# 沙箱服务配置
+listen_addr = "0.0.0.0:8000"
+# 最大并行评测任务数，超出排队
+max_parallel = 4
+# 工作目录（容器内挂载 ai-oj-work volume 的路径）
+work_dir = "/work"
+# 子容器共享 volume 名称
+work_volume = "ai-oj-work"
+# 子容器名称前缀，用于启动时清理残留
+container_prefix = "ai-oj-sandbox-"
+# 默认时间/内存限制
+default_time_limit_ms = 2000
+default_memory_limit_mb = 256
+# 编译超时（秒）
+compile_timeout_secs = 60
+# 编译容器内存限制（MB）
+compile_memory_mb = 512
+# 输出读取上限（字节），超过判 OLE
+output_limit_bytes = 16777216
+# 任务目录保留时间（秒），到期异步清理
+task_ttl_secs = 300

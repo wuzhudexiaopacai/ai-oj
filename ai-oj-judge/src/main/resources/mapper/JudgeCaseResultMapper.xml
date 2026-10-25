@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper">
+
+    <!-- BaseEntity 无 createBy/updateBy，审计列由 DB 默认 NULL -->
+    <insert id="insertBatch">
+        INSERT INTO judge_case_result (id, submission_id, seq, status, time_used, memory_used, score, output_preview,
+                                       create_time, update_time, deleted)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.submissionId}, #{item.seq}, #{item.status}, #{item.timeUsed}, #{item.memoryUsed},
+             #{item.score}, #{item.outputPreview}, NOW(), NOW(), 0)
+        </foreach>
+    </insert>
+
+</mapper>

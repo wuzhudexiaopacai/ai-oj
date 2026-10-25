@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.github.wuzhudexiaopacai</groupId>
+        <artifactId>ai-oj</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>ai-oj-api</artifactId>
+    <name>ai-oj-api</name>
+    <description>服务间 Feign 契约与共享 DTO（供各服务依赖调用，契约统一收口，避免循环依赖）</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.github.wuzhudexiaopacai</groupId>
+            <artifactId>ai-oj-common-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+    </dependencies>
+</project>

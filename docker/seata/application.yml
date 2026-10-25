@@ -1,0 +1,36 @@
+server:
+  servicePort: 8091
+
+spring:
+  application:
+    name: seata-server
+
+logging:
+  config: classpath:logback-spring.xml
+  file:
+    path: /root/logs/seata
+
+# Seata 2.3 移除了控制台默认账号，必须显式配置（顶层 console 前缀），否则启动报 console.user.username 占位符无法解析
+console:
+  user:
+    username: seata
+    password: seata
+
+seata:
+  # 演示环境使用 file 存储免建库；生产建议改 db/redis 存储
+  store:
+    mode: file
+  security:
+    secretKey: SeataSecretKey0c382ef121d778043159209298fd40bf3850a017
+    tokenValidityInMilliseconds: 1800000
+    ignore:
+      urls: /,/**/*.css,/**/*.js,/**/*.html,/**/*.map,/**/*.svg,/**/*.png,/**/*.jpeg,/**/*.ico,/api/v1/auth/login,/v3/api-docs
+  # Nacos 2.4.3 兼容 Seata 2.3 内置 nacos-client 的 /nacos/v1 API
+  registry:
+    type: nacos
+    nacos:
+      application: seata-server
+      server-addr: nacos:8848
+      group: SEATA_GROUP
+      namespace: ""
+      cluster: default

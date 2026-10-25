@@ -1,0 +1,75 @@
+# AI-OJ 网关配置
+# @author wuzhudexiaopacai
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      default-filters:
+        # 全链路响应头携带请求ID，便于排障
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins: "*"
+            allowed-methods: "*"
+            allowed-headers: "*"
+            allow-credentials: false
+      routes:
+        - id: ai-oj-auth
+          uri: lb://ai-oj-auth
+          predicates:
+            - Path=/api/auth/**, /api/user/**, /api/admin/user/**, /api/admin/role/**, /api/admin/permission/**
+          filters:
+            - StripPrefix=1
+        - id: ai-oj-problem
+          uri: lb://ai-oj-problem
+          predicates:
+            - Path=/api/problem/**, /api/tag/**, /api/solution/**, /api/admin/problem/**
+          filters:
+            - StripPrefix=1
+        - id: ai-oj-judge
+          uri: lb://ai-oj-judge
+          predicates:
+            - Path=/api/judge/**, /api/submission/**
+          filters:
+            - StripPrefix=1
+        - id: ai-oj-contest
+          uri: lb://ai-oj-contest
+          predicates:
+            - Path=/api/contest/**
+          filters:
+            - StripPrefix=1
+        - id: ai-oj-file
+          uri: lb://ai-oj-file
+          predicates:
+            - Path=/api/file/**
+          filters:
+            - StripPrefix=1
+        - id: ai-oj-ai
+          uri: lb://ai-oj-ai
+          predicates:
+            - Path=/api/ai/**
+          filters:
+            - StripPrefix=1
+        # WebSocket 判题进度推送（不 strip 前缀）
+        - id: ai-oj-judge-ws
+          uri: lb:ws://ai-oj-judge
+          predicates:
+            - Path=/ws/**
+
+# 网关白名单（无需 Token）
+ai-oj:
+  security:
+    white-list:
+      - /api/auth/login
+      - /api/auth/register
+      - /api/auth/captcha
+      - /api/auth/refresh
+      # 题库/比赛为公开只读内容：未登录用户也可浏览（写操作仍由服务内部鉴权拦截）
+      - /api/problem/**
+      - /api/contest/**
+      - /ws/**
+      - /v3/api-docs/**
+      - /doc.html

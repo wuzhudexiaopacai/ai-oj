@@ -1,0 +1,27 @@
+# AI-OJ 题库服务
+# @author wuzhudexiaopacai
+server:
+  port: 9002
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://mysql:3306/ai_oj_problem?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+  elasticsearch:
+    uris: http://elasticsearch:9200
+    socket-timeout: 10s
+    connection-timeout: 5s
+
+ai-oj:
+  problem:
+    # 题目缓存配置
+    cache:
+      detail-ttl-seconds: 1800
+      list-ttl-seconds: 300
+      # 空值缓存防穿透
+      null-ttl-seconds: 60

@@ -1,0 +1,22 @@
+[package]
+name = "ai-oj-sandbox"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+bollard = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+toml = "0.8"
+futures-util = "0.3"
+
+[profile.release]
+opt-level = 2
+strip = true

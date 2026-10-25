@@ -1,0 +1,49 @@
+# AI-OJ 判题服务
+# @author wuzhudexiaopacai
+server:
+  port: 9003
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://mysql:3306/ai_oj_judge?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+  # Quartz 集群模式（JDBC 持久化，多实例共享调度，故障自动接管）
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
+    properties:
+      org:
+        quartz:
+          scheduler:
+            instanceName: ai-oj-judge-scheduler
+            instanceId: AUTO
+          jobStore:
+            class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
+            driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+            tablePrefix: QRTZ_
+            isClustered: true
+            clusterCheckinInterval: 10000
+            useProperties: false
+            misfireThreshold: 60000
+          threadPool:
+            class: org.quartz.simpl.SimpleThreadPool
+            threadCount: 8
+            threadPriority: 5
+            threadsInheritContextClassLoaderOfInitializingThread: true
+
+ai-oj:
+  judge:
+    # 判题进度 Redis 过期时间（秒）
+    progress-ttl-seconds: 3600
+    # 同用户对同题最短提交间隔（秒），防重复提交
+    submit-interval-seconds: 5
+    # 卡死任务扫描（Quartz Cron）：每分钟扫描超时仍未完成的提交
+    stuck-scan-cron: "0 * * * * ?"
+    # 判题超时阈值（秒），超过视为沙箱异常
+    judge-timeout-seconds: 120

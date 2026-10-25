@@ -1,0 +1,350 @@
+<template>
+  <div class="problem-page">
+    <div class="split">
+      <!-- 左侧：题目描述 -->
+      <div class="pane pane-left oj-card">
+        <div v-loading="loading" class="desc">
+          <template v-if="problem">
+            <div class="title-row">
+              <h2 class="title">{{ problem.problemKey }}. {{ problem.title }}</h2>
+              <DifficultyTag :difficulty="problem.difficulty" />
+            </div>
+            <div class="limits oj-muted">
+              <span>时间限制：{{ problem.timeLimit }} ms</span>
+              <el-divider direction="vertical" />
+              <span>内存限制：{{ problem.memoryLimit }} MB</span>
+            </div>
+
+            <el-tabs v-model="leftTab">
+              <el-tab-pane label="题目描述" name="desc">
+                <MarkdownView :content="problem.description" />
+                <template v-if="problem.samples?.length">
+                  <h3 class="sample-title">示例</h3>
+                  <div v-for="(s, i) in problem.samples" :key="i" class="sample">
+                    <div class="sample-block">
+                      <div class="sample-label oj-muted">输入</div>
+                      <pre>{{ s.input }}</pre>
+                    </div>
+                    <div class="sample-block">
+                      <div class="sample-label oj-muted">输出</div>
+                      <pre>{{ s.output }}</pre>
+                    </div>
+                  </div>
+                </template>
+                <template v-if="problem.hint">
+                  <h3 class="sample-title">提示</h3>
+                  <MarkdownView :content="problem.hint" />
+                </template>
+              </el-tab-pane>
+              <el-tab-pane label="提交记录" name="submissions">
+                <MySubmissions :problem-id="problem.id" />
+              </el-tab-pane>
+            </el-tabs>
+          </template>
+          <el-empty v-else-if="!loading" description="题目不存在" />
+        </div>
+      </div>
+
+      <!-- 右侧：代码编辑 + 提交 -->
+      <div class="pane pane-right">
+        <div class="oj-card editor-card">
+          <div class="editor-toolbar">
+            <el-select v-model="language" style="width: 150px" @change="onLanguageChange">
+              <el-option v-for="l in LANGUAGES" :key="l.value" :label="l.label" :value="l.value" />
+            </el-select>
+            <el-button text size="small" @click="resetCode">重置代码</el-button>
+          </div>
+          <CodeEditor v-model="code" :language="monacoLanguage" :height="editorHeight" />
+          <div class="editor-actions">
+            <el-button :icon="MagicStick" @click="aiVisible = true">AI 助手</el-button>
+            <el-button
+              type="primary"
+              :loading="submitting"
+              :disabled="!problem"
+              @click="onSubmit"
+            >
+              {{ submitting ? '提交评测中…' : '提交' }}
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 评测结果 -->
+        <div v-if="result" class="oj-card result-card">
+          <div class="result-header">
+            <span class="result-label">评测结果</span>
+            <JudgeStatusTag :status="result.status" />
+          </div>
+          <div class="result-meta oj-muted">
+            <span v-if="result.timeUsed != null">耗时 {{ result.timeUsed }} ms</span>
+            <span v-if="result.memoryUsed != null">内存 {{ formatMemory(result.memoryUsed) }}</span>
+            <span v-if="result.score != null">得分 {{ result.score }}</span>
+          </div>
+          <!-- 后端 SubmissionDetailVO 的编译/运行错误字段是 errorMessage -->
+          <pre v-if="result.errorMessage" class="compile-msg">{{ result.errorMessage }}</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 助手抽屉 -->
+    <el-drawer v-model="aiVisible" title="AI 智能助手" size="440px">
+      <AiChat :problem="problem" :code="code" :language="language" />
+    </el-drawer>
+  </div>
+</template>
+
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { MagicStick } from '@element-plus/icons-vue'
+import { getProblemDetail } from '@/api/modules/problem'
+import { submitCode, getSubmission } from '@/api/modules/judge'
+import { LANGUAGES, CODE_TEMPLATES, languageOf, NON_TERMINAL_STATUS } from '@/utils/oj'
+import { formatMemory } from '@/utils/format'
+import { useUserStore } from '@/stores/user'
+import CodeEditor from '@/components/CodeEditor.vue'
+import MarkdownView from '@/components/MarkdownView.vue'
+import DifficultyTag from '@/components/DifficultyTag.vue'
+import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
+import MySubmissions from './MySubmissions.vue'
+import AiChat from './AiChat.vue'
+
+const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
+
+const loading = ref(false)
+const problem = ref(null)
+const leftTab = ref('desc')
+
+const language = ref(localStorage.getItem('ai-oj-lang') || 'cpp')
+const code = ref(CODE_TEMPLATES[language.value] || '')
+const editorHeight = Math.max(320, Math.floor(window.innerHeight * 0.55))
+
+const submitting = ref(false)
+const result = ref(null)
+const aiVisible = ref(false)
+
+let pollTimer = null
+
+const monacoLanguage = computed(() => languageOf(language.value).monaco)
+
+async function load() {
+  loading.value = true
+  try {
+    problem.value = await getProblemDetail(route.params.id)
+  } finally {
+    loading.value = false
+  }
+}
+
+function onLanguageChange(lang) {
+  localStorage.setItem('ai-oj-lang', lang)
+  // 若编辑器内容为空或仍是旧模板，则切换为新语言模板
+  const values = Object.values(CODE_TEMPLATES)
+  if (!code.value.trim() || values.includes(code.value)) {
+    code.value = CODE_TEMPLATES[lang] || ''
+  }
+}
+
+function resetCode() {
+  code.value = CODE_TEMPLATES[language.value] || ''
+}
+
+async function onSubmit() {
+  if (!userStore.isLogin) {
+    ElMessage.warning('请先登录后再提交')
+    router.push({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+  if (!code.value.trim()) {
+    ElMessage.warning('请先编写代码')
+    return
+  }
+  submitting.value = true
+  result.value = null
+  // 后端要求客户端生成幂等提交标识（@NotBlank），重复提交同一 submitId 会直接命中已有记录
+  const submitId = crypto.randomUUID()
+  try {
+    await submitCode({
+      submitId,
+      problemId: problem.value.id,
+      // contestId 为雪花 ID 字符串，不能用 Number() 转换（会丢精度），后端 Jackson 支持字符串转 Long
+      contestId: route.query.contestId || 0,
+      language: language.value,
+      code: code.value
+    })
+    ElMessage.success('提交成功，评测中…')
+    pollResult(submitId)
+  } catch {
+    submitting.value = false
+  }
+}
+
+/** 轮询评测结果直到终态（PENDING/COMPILING/JUDGING 为非终态） */
+function pollResult(submitId) {
+  clearTimeout(pollTimer)
+  pollTimer = setTimeout(async () => {
+    try {
+      const data = await getSubmission(submitId)
+      result.value = data
+      if (NON_TERMINAL_STATUS.includes(data.status)) {
+        pollResult(submitId)
+      } else {
+        submitting.value = false
+      }
+    } catch {
+      submitting.value = false
+    }
+  }, 1500)
+}
+
+onMounted(load)
+onBeforeUnmount(() => clearTimeout(pollTimer))
+
+watch(
+  () => route.params.id,
+  (id) => {
+    if (id) {
+      result.value = null
+      load()
+    }
+  }
+)
+</script>
+
+<style scoped>
+.problem-page {
+  padding: 16px;
+}
+
+.split {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.pane-left {
+  flex: 0 0 46%;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+}
+
+.pane-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.limits {
+  margin: 8px 0 4px;
+  font-size: 13px;
+}
+
+.sample-title {
+  margin: 16px 0 8px;
+  font-size: 15px;
+}
+
+.sample {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sample-block {
+  flex: 1;
+  min-width: 0;
+}
+
+.sample-label {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.sample-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--oj-code-bg);
+  border: 1px solid var(--oj-border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.editor-card {
+  padding: 12px;
+}
+
+.editor-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.result-card {
+  padding: 14px 16px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.result-label {
+  font-weight: 600;
+}
+
+.result-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.compile-msg {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--oj-code-bg);
+  border: 1px solid var(--oj-border);
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}
+
+@media (max-width: 960px) {
+  .split {
+    flex-direction: column;
+  }
+
+  .pane-left {
+    flex: none;
+    width: 100%;
+    max-height: none;
+  }
+}
+</style>
