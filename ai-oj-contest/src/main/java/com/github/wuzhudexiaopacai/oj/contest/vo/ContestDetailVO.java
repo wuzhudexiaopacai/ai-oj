@@ -66,6 +66,11 @@ public class ContestDetailVO implements Serializable {
     private Integer auth;
 
     /**
+     * 是否已设置比赛密码（仅回显状态，不下发明文；编辑时留空表示不修改）
+     */
+    private Boolean hasPassword;
+
+    /**
      * 比赛题目列表（按 sort 升序）
      */
     private List<ContestProblemVO> problems;

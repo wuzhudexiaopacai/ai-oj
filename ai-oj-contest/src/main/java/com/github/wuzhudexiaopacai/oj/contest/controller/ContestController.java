@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -52,13 +53,14 @@ public class ContestController {
         return Result.ok(contestService.detail(id));
     }
 
-    @Operation(summary = "报名比赛")
+    @Operation(summary = "报名比赛（私有赛需携带密码）")
     @PostMapping("/{id}/register")
     @Idempotent(
             key = "'contest:register:' + #contestId + ':' + T(com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils).currentUserIdOrNull()",
             message = "请勿重复报名")
-    public Result<Void> register(@PathVariable("id") Long contestId) {
-        registrationService.register(contestId);
+    public Result<Void> register(@PathVariable("id") Long contestId,
+                                 @RequestParam(value = "password", required = false) String password) {
+        registrationService.register(contestId, password);
         return Result.ok();
     }
 

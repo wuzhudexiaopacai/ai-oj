@@ -13,8 +13,9 @@ public interface ContestRegistrationService {
      * 远程失败抛 BizException 触发全局回滚；数据库 uk 兜底幂等）
      *
      * @param contestId 比赛 ID
+     * @param password  比赛密码（私有赛必填，公开赛忽略）
      */
-    void register(Long contestId);
+    void register(Long contestId, String password);
 
     /**
      * 取消报名（物理删除报名记录；成绩记录 contest_record 保留在判题库中不删除）

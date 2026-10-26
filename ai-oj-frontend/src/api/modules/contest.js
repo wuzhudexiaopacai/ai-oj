@@ -9,8 +9,9 @@ export function getContestDetail(id) {
   return request.get(`/contest/${id}`)
 }
 
-export function registerContest(id) {
-  return request.post(`/contest/${id}/register`)
+export function registerContest(id, password) {
+  // 私有赛需携带比赛密码，公开赛不传
+  return request.post(`/contest/${id}/register`, null, { params: password ? { password } : {} })
 }
 
 export function getContestRank(id, params) {

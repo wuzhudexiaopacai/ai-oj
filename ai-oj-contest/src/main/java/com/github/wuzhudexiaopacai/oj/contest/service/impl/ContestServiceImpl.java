@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestProblemStatusDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.JudgeFeignClient;
+import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.ContestStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
@@ -34,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -67,6 +69,16 @@ public class ContestServiceImpl implements ContestService {
      * 默认可见性：公开
      */
     private static final int AUTH_PUBLIC = 1;
+
+    /**
+     * 可见性：私有（需凭密码报名后才能看到题目）
+     */
+    private static final int AUTH_PRIVATE = 2;
+
+    /**
+     * 比赛管理权限标识（管理员不受题目可见性限制）
+     */
+    private static final String AUTHORITY_CONTEST_MANAGE = "contest:manage";
 
     /**
      * 单场比赛题目数量上限（display_id A~Z）
@@ -136,9 +148,35 @@ public class ContestServiceImpl implements ContestService {
         ContestDetailVO detailVO = loadDetail(id);
         // 报名人数/当前用户报名状态与用户相关，每次请求实时补全（不进入详情缓存）
         fillRegistration(id, detailVO);
+        // 题目可见性：开始前一律隐藏；私有赛还需先凭密码报名；管理员始终可见
+        if (!isContestAdmin() && isProblemHidden(detailVO)) {
+            detailVO.setProblems(List.of());
+        }
         // 比赛题目做题状态同样与用户相关，按 contestId 独立计算后实时补全
         fillProblemStatus(id, detailVO);
         return detailVO;
+    }
+
+    /**
+     * 是否隐藏题目列表：比赛开始前（含公开赛）或私有赛未报名
+     *
+     * @param detailVO 比赛详情（报名状态已回填）
+     * @return true 表示不返回题目列表
+     */
+    private boolean isProblemHidden(ContestDetailVO detailVO) {
+        if (detailVO.getStartTime() == null || LocalDateTime.now().isBefore(detailVO.getStartTime())) {
+            return true;
+        }
+        return Integer.valueOf(AUTH_PRIVATE).equals(detailVO.getAuth())
+                && !Boolean.TRUE.equals(detailVO.getRegistered());
+    }
+
+    /**
+     * 当前登录用户是否具备比赛管理权限
+     */
+    private boolean isContestAdmin() {
+        LoginUser loginUser = SecurityUtils.currentUser();
+        return loginUser != null && loginUser.hasAuthority(AUTHORITY_CONTEST_MANAGE);
     }
 
     /**
@@ -227,6 +265,9 @@ public class ContestServiceImpl implements ContestService {
         if (contest.getPassword() == null) {
             contest.setPassword("");
         }
+        // 私有赛没有密码会导致任何人都无法报名，创建时直接拦下
+        Asserts.isTrue(!Integer.valueOf(AUTH_PRIVATE).equals(contest.getAuth())
+                || StringUtils.hasText(contest.getPassword()), "私有赛必须设置比赛密码");
         contestMapper.insert(contest);
         return contest.getId();
     }
@@ -240,6 +281,16 @@ public class ContestServiceImpl implements ContestService {
         Contest contest = new Contest();
         BeanUtils.copyProperties(saveDTO, contest);
         contest.setId(id);
+        if (Integer.valueOf(AUTH_PRIVATE).equals(contest.getAuth())) {
+            // 密码留空表示沿用原密码（详情接口不回显明文密码）
+            if (!StringUtils.hasText(contest.getPassword())) {
+                contest.setPassword(exist.getPassword());
+            }
+            Asserts.isTrue(StringUtils.hasText(contest.getPassword()), "私有赛必须设置比赛密码");
+        } else {
+            // 改回公开赛时清空密码
+            contest.setPassword("");
+        }
         // 乐观锁：携带当前版本，并发修改时更新失败由 MyBatis-Plus 乐观锁插件兜底
         contest.setVersion(exist.getVersion());
         contestMapper.updateById(contest);
@@ -369,8 +420,9 @@ public class ContestServiceImpl implements ContestService {
 
     private ContestDetailVO toDetailVO(Contest contest) {
         ContestDetailVO vo = new ContestDetailVO();
-        // 密码不下发
+        // 密码不下发，仅回显是否已设置
         BeanUtils.copyProperties(contest, vo, "password");
+        vo.setHasPassword(StringUtils.hasText(contest.getPassword()));
         return vo;
     }
 

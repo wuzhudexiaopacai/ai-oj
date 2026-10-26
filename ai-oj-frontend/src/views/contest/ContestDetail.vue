@@ -11,6 +11,7 @@
               <span>{{ contest.registerCount ?? 0 }} 人已报名</span>
             </div>
           </div>
+          <el-tag v-if="contest.auth === 2" type="warning" effect="plain" round>私有赛</el-tag>
           <el-tag v-if="registered" type="success" round>已报名</el-tag>
           <el-button
             v-else-if="userStore.isLogin"
@@ -58,7 +59,7 @@
                   <template #default="{ row }">{{ row.score ?? '-' }}</template>
                 </el-table-column>
                 <template #empty>
-                  <el-empty description="暂无题目" :image-size="60" />
+                  <el-empty :description="problemsHint" :image-size="60" />
                 </template>
               </el-table>
               <!-- 有题目就展示分页器，避免题量不足一页时看起来像没有分页 -->
@@ -103,7 +104,8 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import dayjs from 'dayjs'
 import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { getContestDetail, registerContest, getContestRank } from '@/api/modules/contest'
 import { formatTime } from '@/utils/format'
@@ -133,6 +135,14 @@ const pagedProblems = computed(() => {
   const all = contest.value?.problems || []
   const start = (problemPage.value - 1) * problemPageSize
   return all.slice(start, start + problemPageSize)
+})
+
+/** 题目列表为空时的提示：区分「未开赛」与「私有赛未报名」 */
+const problemsHint = computed(() => {
+  if (!contest.value) return '暂无题目'
+  if (dayjs(contest.value.startTime).isAfter(dayjs())) return '比赛开始后可见题目'
+  if (contest.value.auth === 2 && !registered.value) return '该比赛为私有赛，请输入密码报名后查看题目'
+  return '暂无题目'
 })
 
 async function load() {
@@ -165,12 +175,33 @@ function formatPenalty(seconds) {
 }
 
 async function onRegister() {
+  // 私有赛报名前需输入比赛密码
+  let password
+  if (contest.value.auth === 2) {
+    try {
+      const { value } = await ElMessageBox.prompt('该比赛为私有赛，请输入比赛密码后报名', '私有比赛', {
+        inputType: 'password',
+        inputPlaceholder: '请输入比赛密码',
+        confirmButtonText: '报名',
+        cancelButtonText: '取消',
+        inputValidator: (v) => (v && v.trim() ? true : '请输入比赛密码')
+      })
+      password = value.trim()
+    } catch (e) {
+      // 用户取消输入密码，不发起报名
+      return
+    }
+  }
   registering.value = true
   try {
-    await registerContest(contestId)
+    await registerContest(contestId, password)
     ElMessage.success('报名成功')
     registered.value = true
     contest.value.registerCount = (contest.value.registerCount || 0) + 1
+    // 私有赛报名后后端才会返回题目列表，重新拉取详情
+    if (contest.value.auth === 2) {
+      await load()
+    }
   } finally {
     registering.value = false
   }

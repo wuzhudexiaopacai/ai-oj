@@ -116,7 +116,15 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="editForm.auth === 2" label="比赛密码" prop="password">
-          <el-input v-model="editForm.password" maxlength="64" show-password placeholder="私有赛需凭密码报名" />
+          <el-input
+            v-model="editForm.password"
+            maxlength="64"
+            show-password
+            :placeholder="editForm.hasPassword ? '已设置密码，留空表示不修改' : '私有赛需凭密码报名'"
+          />
+          <div v-if="editForm.hasPassword" class="oj-muted pwd-hint">
+            已设置密码（不回显明文），留空保存则保持不变；输入新密码即覆盖
+          </div>
         </el-form-item>
         <el-form-item label="比赛说明">
           <el-input
@@ -257,6 +265,7 @@ const editForm = reactive({
   sealTime: null,
   auth: 1,
   password: '',
+  hasPassword: false,
   description: ''
 })
 
@@ -264,12 +273,24 @@ const editRules = {
   title: [{ required: true, message: '请输入比赛标题', trigger: 'blur' }],
   type: [{ required: true, message: '请选择赛制', trigger: 'change' }],
   timeRange: [{ required: true, type: 'array', len: 2, message: '请选择起止时间', trigger: 'change' }],
-  password: [{ required: true, message: '私有赛请设置密码', trigger: 'blur' }]
+  // 私有赛只在「尚未设置过密码」时才要求填写；已设置过的留空表示沿用原密码
+  password: [
+    {
+      validator: (rule, value, callback) => {
+        if (editForm.auth === 2 && !editForm.hasPassword && !value) {
+          callback(new Error('私有赛请设置密码'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ]
 }
 
 async function openEdit(row) {
   Object.assign(editForm, {
-    id: null, title: '', type: 0, timeRange: [], sealTime: null, auth: 1, password: '', description: ''
+    id: null, title: '', type: 0, timeRange: [], sealTime: null, auth: 1, password: '', hasPassword: false, description: ''
   })
   if (row) {
     const detail = await getContestDetail(row.id)
@@ -281,6 +302,7 @@ async function openEdit(row) {
       sealTime: detail.sealTime || null,
       auth: detail.auth ?? 1,
       password: '',
+      hasPassword: !!detail.hasPassword,
       description: detail.description || ''
     })
   }
@@ -446,5 +468,12 @@ onMounted(() => load())
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+.pwd-hint {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

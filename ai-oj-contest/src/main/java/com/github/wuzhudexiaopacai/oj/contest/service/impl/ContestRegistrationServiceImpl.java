@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * 比赛报名服务实现
@@ -36,6 +37,11 @@ public class ContestRegistrationServiceImpl implements ContestRegistrationServic
      */
     private static final int STATUS_REGISTERED = 1;
 
+    /**
+     * 可见性：私有（需凭密码报名）
+     */
+    private static final int AUTH_PRIVATE = 2;
+
     private final ContestMapper contestMapper;
 
     private final ContestRegistrationMapper registrationMapper;
@@ -44,10 +50,15 @@ public class ContestRegistrationServiceImpl implements ContestRegistrationServic
 
     @Override
     @GlobalTransactional(name = "contest-register-tx", rollbackFor = Exception.class)
-    public void register(Long contestId) {
+    public void register(Long contestId, String password) {
         LoginUser loginUser = SecurityUtils.requireLogin();
         Contest contest = contestMapper.selectById(contestId);
         Asserts.notNull(contest, "比赛不存在");
+        // 私有赛必须校验密码，否则拿到链接的人可以直接报名看到题目
+        if (Integer.valueOf(AUTH_PRIVATE).equals(contest.getAuth())) {
+            Asserts.isTrue(StringUtils.hasText(contest.getPassword()), "该比赛为私有赛但未设置密码，请联系管理员");
+            Asserts.isTrue(StringUtils.hasText(password) && contest.getPassword().equals(password), "比赛密码错误");
+        }
         String status = contest.getStatus();
         Asserts.isTrue(ContestStatusEnum.SCHEDULED.name().equals(status)
                         || ContestStatusEnum.RUNNING.name().equals(status),
