@@ -71,5 +71,15 @@ public class SubmissionDetailVO implements Serializable {
         private Integer score;
 
         private String outputPreview;
+
+        /**
+         * 失败用例的输入（仅非比赛提交返回，超长截断）
+         */
+        private String inputPreview;
+
+        /**
+         * 失败用例的期望输出（仅非比赛提交返回，超长截断）
+         */
+        private String expectedPreview;
     }
 }

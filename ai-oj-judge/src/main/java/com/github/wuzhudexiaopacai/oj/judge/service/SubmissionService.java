@@ -1,9 +1,13 @@
 package com.github.wuzhudexiaopacai.oj.judge.service;
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestProblemStatusDTO;
+import com.github.wuzhudexiaopacai.oj.api.dto.JudgeCaseDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemBriefDTO;
+import com.github.wuzhudexiaopacai.oj.api.dto.ProblemJudgeDTO;
+import com.github.wuzhudexiaopacai.oj.api.feign.FileFeignClient;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
@@ -31,6 +35,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 提交记录查询服务
@@ -43,6 +49,11 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class SubmissionService {
 
+    /**
+     * 失败用例内容回显的最大长度（字符），避免大用例把详情响应撑大
+     */
+    private static final int CASE_PREVIEW_MAX_LENGTH = 4096;
+
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
     private final JudgeCaseResultMapper judgeCaseResultMapper;
@@ -52,6 +63,8 @@ public class SubmissionService {
     private final ObjectMapper objectMapper;
 
     private final ProblemFeignClient problemFeignClient;
+
+    private final FileFeignClient fileFeignClient;
 
     /**
      * 题目简要信息本地缓存：提交记录分页时避免逐行远程调用
@@ -131,13 +144,82 @@ public class SubmissionService {
                 new LambdaQueryWrapper<JudgeCaseResult>()
                         .eq(JudgeCaseResult::getSubmissionId, id)
                         .orderByAsc(JudgeCaseResult::getSeq));
-        vo.setCases(cases.stream().map(c -> {
+        List<SubmissionDetailVO.CaseResultItem> caseItems = cases.stream().map(c -> {
             SubmissionDetailVO.CaseResultItem item = new SubmissionDetailVO.CaseResultItem();
             BeanUtils.copyProperties(c, item);
             item.setStatusDesc(JudgeStatusEnum.fromCode(c.getStatus()).getDesc());
             return item;
-        }).toList());
+        }).toList();
+        vo.setCases(caseItems);
+        // 仅普通题目（非比赛）回显失败用例的输入/期望输出；比赛提交一律不回显，避免泄露赛题数据
+        if (isNormalSubmission(submission) && !caseItems.isEmpty()
+                && statusEnum != JudgeStatusEnum.ACCEPTED) {
+            fillFailedCaseContent(submission.getProblemId(), caseItems);
+        }
         return vo;
+    }
+
+    /**
+     * 是否为普通题目提交（非比赛）
+     */
+    private boolean isNormalSubmission(JudgeSubmission submission) {
+        return submission.getContestId() == null || submission.getContestId() == 0L;
+    }
+
+    /**
+     * 回填失败用例的输入与期望输出（超长截断），任一步失败只降级不阻断详情查询
+     */
+    private void fillFailedCaseContent(Long problemId, List<SubmissionDetailVO.CaseResultItem> items) {
+        int acceptedCode = JudgeStatusEnum.ACCEPTED.getCode();
+        List<SubmissionDetailVO.CaseResultItem> failedItems = items.stream()
+                .filter(item -> item.getStatus() == null || item.getStatus() != acceptedCode)
+                .toList();
+        if (failedItems.isEmpty()) {
+            return;
+        }
+        Map<Integer, JudgeCaseDTO> caseMap;
+        try {
+            Result<ProblemJudgeDTO> result = problemFeignClient.getJudgeInfo(problemId);
+            if (result == null || !result.isSuccess() || result.getData() == null
+                    || result.getData().getCases() == null) {
+                return;
+            }
+            caseMap = result.getData().getCases().stream()
+                    .collect(Collectors.toMap(JudgeCaseDTO::getSeq, Function.identity(), (a, b) -> a));
+        } catch (Exception e) {
+            log.warn("回显失败用例时拉取题目用例失败 problemId={}", problemId, e);
+            return;
+        }
+        for (SubmissionDetailVO.CaseResultItem item : failedItems) {
+            JudgeCaseDTO judgeCase = caseMap.get(item.getSeq());
+            if (judgeCase == null) {
+                continue;
+            }
+            item.setInputPreview(casePreview(judgeCase.getInput(), judgeCase.getInputFile()));
+            item.setExpectedPreview(casePreview(judgeCase.getOutput(), judgeCase.getOutputFile()));
+        }
+    }
+
+    /**
+     * 用例内容预览：内联内容优先，大数据走 MinIO 文件读取，超长截断
+     */
+    private String casePreview(String inlineContent, String objectKey) {
+        String content = inlineContent;
+        if (!StringUtils.hasText(content) && StringUtils.hasText(objectKey)) {
+            try {
+                Result<String> fileResult = fileFeignClient.getContent(objectKey);
+                content = fileResult == null || !fileResult.isSuccess() ? null : fileResult.getData();
+            } catch (Exception e) {
+                log.warn("读取用例文件失败 objectKey={}", objectKey, e);
+                return null;
+            }
+        }
+        if (content == null) {
+            return null;
+        }
+        return content.length() <= CASE_PREVIEW_MAX_LENGTH
+                ? content
+                : StrUtil.subPre(content, CASE_PREVIEW_MAX_LENGTH) + "\n...（内容过长，已截断）";
     }
 
     /**

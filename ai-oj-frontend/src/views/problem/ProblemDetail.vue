@@ -81,6 +81,34 @@
           </div>
           <!-- 后端 SubmissionDetailVO 的编译/运行错误字段是 errorMessage -->
           <pre v-if="result.errorMessage" class="compile-msg">{{ result.errorMessage }}</pre>
+
+          <!-- 失败用例回显（仅普通题目提交：比赛提交后端不返回用例数据） -->
+          <template v-if="failedCases.length">
+            <div class="wrong-case-head">
+              <span class="wrong-case-title">错误用例（共 {{ failedCases.length }} 个）</span>
+              <el-button link type="primary" size="small" @click="downloadWrongCases">下载错误用例</el-button>
+            </div>
+            <el-collapse class="wrong-case-list">
+              <el-collapse-item v-for="item in failedCases" :key="item.seq" :name="item.seq">
+                <template #title>
+                  <span class="wrong-case-seq">用例 #{{ item.seq }}</span>
+                  <JudgeStatusTag :status="item.status" />
+                </template>
+                <div class="case-block">
+                  <div class="case-label">输入</div>
+                  <pre class="case-pre">{{ item.inputPreview || '（空）' }}</pre>
+                </div>
+                <div class="case-block">
+                  <div class="case-label">期望输出</div>
+                  <pre class="case-pre">{{ item.expectedPreview || '（空）' }}</pre>
+                </div>
+                <div class="case-block">
+                  <div class="case-label">你的输出</div>
+                  <pre class="case-pre">{{ item.outputPreview || '（空）' }}</pre>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </template>
         </div>
       </div>
     </div>
@@ -129,6 +157,39 @@ const submissionsRef = ref(null)
 let pollTimer = null
 
 const monacoLanguage = computed(() => languageOf(language.value).monaco)
+
+/**
+ * 失败用例：后端只对普通题目（非比赛）提交回填输入/期望输出，
+ * 因此用这两个字段是否存在来判断是否可回显
+ */
+const failedCases = computed(() =>
+  (result.value?.cases || []).filter((item) => item.inputPreview != null || item.expectedPreview != null)
+)
+
+/** 下载错误用例（前端根据已获取的用例内容生成 txt，无需额外接口） */
+function downloadWrongCases() {
+  const text = failedCases.value
+    .map((item) =>
+      [
+        `===== 用例 #${item.seq}（${item.statusDesc || ''}）=====`,
+        '【输入】',
+        item.inputPreview || '',
+        '【期望输出】',
+        item.expectedPreview || '',
+        '【你的输出】',
+        item.outputPreview || '',
+        ''
+      ].join('\n')
+    )
+    .join('\n')
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `错误用例-${result.value?.submitId || 'submission'}.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 async function load() {
   loading.value = true
@@ -345,6 +406,50 @@ watch(
   border-radius: 6px;
   font-size: 12px;
   white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.wrong-case-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.wrong-case-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wrong-case-list {
+  margin-top: 4px;
+}
+
+.wrong-case-seq {
+  margin-right: 8px;
+  font-size: 13px;
+}
+
+.case-block + .case-block {
+  margin-top: 10px;
+}
+
+.case-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--oj-text-secondary, #909399);
+}
+
+.case-pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--oj-code-bg);
+  border: 1px solid var(--oj-border);
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
   max-height: 200px;
   overflow: auto;
 }
