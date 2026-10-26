@@ -9,6 +9,8 @@ import com.github.wuzhudexiaopacai.oj.contest.vo.ContestDetailVO;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestPageVO;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestTimeVO;
 
+import java.util.List;
+
 /**
  * 比赛服务
  *
@@ -24,6 +26,13 @@ public interface ContestService {
      * @return 分页结果
      */
     PageResult<ContestPageVO> page(ContestPageQueryDTO query);
+
+    /**
+     * 当前登录用户已报名的比赛（个人中心「我的比赛」）
+     *
+     * @return 比赛列表，按开始时间倒序
+     */
+    List<ContestPageVO> mine();
 
     /**
      * 查询比赛详情（含题目列表；带 Redis 缓存 contest:info:{id} TTL 10min）

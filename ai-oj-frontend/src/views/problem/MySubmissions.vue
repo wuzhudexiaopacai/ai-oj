@@ -15,6 +15,11 @@
           <span class="oj-muted">{{ row.timeUsed != null ? row.timeUsed + ' ms' : '-' }}</span>
         </template>
       </el-table-column>
+      <el-table-column label="内存" width="90">
+        <template #default="{ row }">
+          <span class="oj-muted">{{ row.memoryUsed > 0 ? formatMemory(row.memoryUsed) : '-' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="提交时间" min-width="150">
         <template #default="{ row }">
           <span class="oj-muted">{{ formatTime(row.createTime) }}</span>
@@ -42,7 +47,7 @@
 import { onMounted, ref } from 'vue'
 import { pageSubmissions } from '@/api/modules/judge'
 import { languageOf } from '@/utils/oj'
-import { formatTime } from '@/utils/format'
+import { formatMemory, formatTime } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
 import SubmissionFilter from '@/components/SubmissionFilter.vue'

@@ -29,7 +29,8 @@ public class AiConfig {
     /**
      * 兜底系统提示词（当场景模板缺失时使用）
      */
-    private static final String DEFAULT_SYSTEM = "你是 AI-OJ 内置的编程助手，擅长算法与工程问题，用中文简洁回答。";
+    private static final String DEFAULT_SYSTEM = "你是 AI-OJ 内置的编程助手，擅长算法与工程问题，用中文简洁回答。"
+            + "严禁直接给出题目的完整答案（完整代码、可直接提交的解法或最终结果），只能提供思路、调试方法与关键细节引导。";
 
     /**
      * 构建 DashScope 聊天模型（每次配置刷新时重建，使新密钥/端点立即生效）

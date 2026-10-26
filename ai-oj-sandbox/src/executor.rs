@@ -115,14 +115,17 @@ impl Executor {
         // 容器内 timeout 秒数（向上取整，含语言时间补偿）
         let limit_ms = (time_limit_ms as f64 * lang.time_factor) as u64;
         let timeout_secs = ((limit_ms + 999) / 1000).max(1);
-        // timeout 触发 TLE 时退出码为 124
+        // timeout 触发 TLE 时退出码为 124；
+        // 程序结束后读取容器自身 cgroup 的内存峰值（memory.peak）写入 .mem，
+        // 短时间运行的程序无法被 Docker stats 秒级采样捕获，cgroup 峰值是准确的兜底来源。
         let shell_cmd = format!(
-            "timeout {} {} < case_{}.in > case_{}.out 2> case_{}.err",
+            "timeout {} {} < case_{seq}.in > case_{seq}.out 2> case_{seq}.err; rc=$?; \
+             cat /sys/fs/cgroup/memory.peak > case_{seq}.mem 2>/dev/null; \
+             cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes >> case_{seq}.mem 2>/dev/null; \
+             exit $rc",
             timeout_secs,
             lang.run_cmd.join(" "),
-            seq,
-            seq,
-            seq
+            seq = seq
         );
         let mem_bytes = (memory_limit_mb as f64 * lang.memory_factor * 1024.0 * 1024.0) as i64;
         let limit_kb = (mem_bytes / 1024) as u64;
@@ -159,18 +162,31 @@ impl Executor {
             read_limited(&out_path, self.config.output_limit_bytes).await?;
         let (stderr, _) = read_limited(&err_path, 64 * 1024).await?;
 
+        // 内存峰值优先取 cgroup 记录（字节），读不到时退回 Docker stats 采样值（KB）
+        let mem_path = format!("{task_dir}/case_{seq}.mem");
+        let cgroup_kb = match fs::read_to_string(&mem_path).await {
+            Ok(text) => text
+                .lines()
+                .next()
+                .and_then(|line| line.trim().parse::<u64>().ok())
+                .map(|bytes| bytes / 1024)
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
+        let memory_kb = if cgroup_kb > 0 { cgroup_kb } else { result.memory_kb };
+
         if status == Status::Accepted && out_exceeded {
             status = Status::OutputLimitExceeded;
         }
-        // MLE 判定：有采样数据且超限（stats 采样失败时 memory_kb 为 0，不误判）
-        if status == Status::Accepted && result.memory_kb > 0 && result.memory_kb > limit_kb {
+        // MLE 判定：有采样数据且超限（采样失败时 memory_kb 为 0，不误判）
+        if status == Status::Accepted && memory_kb > 0 && memory_kb > limit_kb {
             status = Status::MemoryLimitExceeded;
         }
 
         Ok(CaseRunOutcome {
             status,
             time_ms,
-            memory_kb: result.memory_kb,
+            memory_kb,
             output,
             stderr,
         })

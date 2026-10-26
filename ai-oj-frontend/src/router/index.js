@@ -19,6 +19,18 @@ const routes = [
         name: 'user-profile',
         component: () => import('@/views/user/Profile.vue'),
         meta: { title: '个人中心', requiresAuth: true }
+      },
+      {
+        path: 'user/settings',
+        name: 'user-settings',
+        component: () => import('@/views/user/ProfileSettings.vue'),
+        meta: { title: '编辑个人资料', requiresAuth: true }
+      },
+      {
+        path: 'user/records',
+        name: 'user-records',
+        component: () => import('@/views/user/MyRecords.vue'),
+        meta: { title: '我的记录', requiresAuth: true }
       }
     ]
   },

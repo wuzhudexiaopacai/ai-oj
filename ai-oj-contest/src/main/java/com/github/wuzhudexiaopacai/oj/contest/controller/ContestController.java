@@ -47,6 +47,12 @@ public class ContestController {
         return Result.ok(contestService.page(query));
     }
 
+    @Operation(summary = "我报名的比赛")
+    @GetMapping("/mine")
+    public Result<List<ContestPageVO>> mine() {
+        return Result.ok(contestService.mine());
+    }
+
     @Operation(summary = "比赛详情（含题目列表）")
     @GetMapping("/{id}")
     public Result<ContestDetailVO> detail(@PathVariable("id") Long id) {

@@ -36,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -120,6 +121,28 @@ public class ContestServiceImpl implements ContestService {
         // 报名人数走一次 group by 批量回填，避免逐条查询
         fillRegisterCount(voPage.getRecords());
         return voPage;
+    }
+
+    @Override
+    public List<ContestPageVO> mine() {
+        Long userId = SecurityUtils.requireLogin().getId();
+        List<ContestRegistration> registrations = contestRegistrationMapper.selectList(
+                new LambdaQueryWrapper<ContestRegistration>()
+                        .eq(ContestRegistration::getUserId, userId));
+        if (registrations.isEmpty()) {
+            return List.of();
+        }
+        List<Long> contestIds = registrations.stream()
+                .map(ContestRegistration::getContestId)
+                .distinct()
+                .toList();
+        List<Contest> contests = contestMapper.selectBatchIds(contestIds);
+        List<ContestPageVO> records = contests.stream()
+                .sorted(Comparator.comparing(Contest::getStartTime, Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(this::toPageVO)
+                .collect(Collectors.toList());
+        fillRegisterCount(records);
+        return records;
     }
 
     /**

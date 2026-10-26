@@ -77,7 +77,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { Sunny, Moon, ArrowDown, User, SwitchButton, Setting } from '@element-plus/icons-vue'
@@ -90,6 +90,14 @@ const themeStore = useThemeStore()
 const userStore = useUserStore()
 
 const isDark = computed(() => themeStore.isDark)
+
+// 刷新后本地只剩 token，用户信息（昵称/头像/ID）缺失时补拉一次，
+// 否则排行榜「我」标记等依赖 userId 的展示会失效
+onMounted(() => {
+  if (userStore.isLogin && !userStore.userInfo?.id) {
+    userStore.fetchUserInfo().catch(() => {})
+  }
+})
 
 // 高亮当前一级菜单
 const activeMenu = computed(() => {
