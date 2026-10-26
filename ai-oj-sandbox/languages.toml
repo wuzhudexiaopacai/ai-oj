@@ -46,6 +46,14 @@ time_factor = 1.0
 memory_factor = 1.0
 
 [[languages]]
+name = "javascript"
+image = "node:20-alpine"
+source_file = "main.js"
+run_cmd = ["node", "main.js"]
+time_factor = 2.0
+memory_factor = 1.0
+
+[[languages]]
 name = "rust"
 image = "rust:1.82-bookworm"
 source_file = "main.rs"
