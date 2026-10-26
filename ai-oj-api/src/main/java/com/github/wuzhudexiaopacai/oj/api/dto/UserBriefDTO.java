@@ -20,4 +20,6 @@ public class UserBriefDTO implements Serializable {
     private String nickname;
 
     private String avatar;
+
+    private String intro;
 }

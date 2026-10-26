@@ -42,6 +42,14 @@ public interface FileService {
     UploadInitVO merge(FileMergeRequest request);
 
     /**
+     * 上传头像（图片直接存入公共桶，返回可匿名访问的相对地址）
+     *
+     * @param file 图片文件
+     * @return 头像地址，如 /files/avatar/xxx.png
+     */
+    String uploadAvatar(MultipartFile file);
+
+    /**
      * 获取文件预签名下载 URL
      *
      * @param id 文件记录 ID

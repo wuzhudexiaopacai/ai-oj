@@ -3,6 +3,7 @@ package com.github.wuzhudexiaopacai.oj.file.config;
 import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
+import io.minio.SetBucketPolicyArgs;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationRunner;
@@ -43,6 +44,11 @@ public class MinioConfig {
     private String bucket;
 
     /**
+     * 公共桶名（头像等可匿名读取的资源）
+     */
+    private String publicBucket = "ai-oj-public";
+
+    /**
      * MinIO 客户端
      *
      * @return MinioClient
@@ -56,8 +62,8 @@ public class MinioConfig {
     }
 
     /**
-     * 启动时确保业务桶存在（已存在则跳过；MinIO 未就绪仅告警不阻断启动，
-     * docker/minio/init-bucket.sh 已兜底建桶）
+     * 启动时确保业务桶/公共桶存在，并为公共桶配置匿名只读策略
+     * （已存在则跳过；MinIO 未就绪仅告警不阻断启动，docker/minio/init-bucket.sh 已兜底建桶）
      *
      * @param minioClient MinIO 客户端
      * @return 启动执行器
@@ -66,16 +72,56 @@ public class MinioConfig {
     public ApplicationRunner ensureBucketRunner(MinioClient minioClient) {
         return args -> {
             try {
-                boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
-                if (!exists) {
-                    minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
-                    log.info("MinIO 业务桶创建成功: {}", bucket);
-                } else {
-                    log.info("MinIO 业务桶已存在，跳过创建: {}", bucket);
-                }
+                ensureBucket(minioClient, bucket);
+                ensureBucket(minioClient, publicBucket);
+                // 公共桶开放匿名读，头像等资源才能被浏览器直接访问
+                minioClient.setBucketPolicy(SetBucketPolicyArgs.builder()
+                        .bucket(publicBucket)
+                        .config(publicReadPolicy(publicBucket))
+                        .build());
             } catch (Exception e) {
-                log.warn("MinIO 业务桶初始化失败（不影响启动，依赖 init-bucket.sh 兜底）: bucket={}, err={}", bucket, e.getMessage());
+                log.warn("MinIO 桶初始化失败（不影响启动，依赖 init-bucket.sh 兜底）: bucket={}, publicBucket={}, err={}",
+                        bucket, publicBucket, e.getMessage());
             }
         };
+    }
+
+    /**
+     * 确保桶存在
+     *
+     * @param minioClient MinIO 客户端
+     * @param bucketName  桶名
+     * @throws Exception MinIO 调用异常
+     */
+    private void ensureBucket(MinioClient minioClient, String bucketName) throws Exception {
+        boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build());
+        if (!exists) {
+            minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
+            log.info("MinIO 桶创建成功: {}", bucketName);
+        } else {
+            log.info("MinIO 桶已存在，跳过创建: {}", bucketName);
+        }
+    }
+
+    /**
+     * 生成桶的匿名只读策略
+     *
+     * @param bucketName 桶名
+     * @return 桶策略 JSON
+     */
+    private String publicReadPolicy(String bucketName) {
+        return """
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {"AWS": ["*"]},
+                      "Action": ["s3:GetObject"],
+                      "Resource": ["arn:aws:s3:::%s/*"]
+                    }
+                  ]
+                }
+                """.formatted(bucketName);
     }
 }

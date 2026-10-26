@@ -24,6 +24,12 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
         changeOrigin: true
+      },
+      // 公开静态资源（头像）：开发期直连 MinIO 公共桶
+      '/files': {
+        target: 'http://localhost:9000/ai-oj-public',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/files/, '')
       }
     }
   },

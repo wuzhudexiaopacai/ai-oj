@@ -77,8 +77,19 @@
             <el-tab-pane label="排行榜" name="rank">
               <el-table v-loading="rankLoading" :data="rank">
                 <el-table-column label="排名" prop="rank" width="80" align="center" />
-                <el-table-column label="用户" min-width="160">
-                  <template #default="{ row }">{{ row.nickname || row.username || '用户 #' + row.userId }}</template>
+                <el-table-column label="用户" min-width="220">
+                  <template #default="{ row }">
+                    <div class="rank-user">
+                      <el-avatar :size="30" :src="row.avatar">
+                        {{ (row.nickname || row.username || '?').charAt(0).toUpperCase() }}
+                      </el-avatar>
+                      <div class="rank-user-text">
+                        <div class="rank-user-name">{{ row.nickname || row.username || '用户 #' + row.userId }}</div>
+                        <!-- 简介过长时单行省略，hover 用 title 展示全文 -->
+                        <div v-if="row.intro" class="rank-user-intro" :title="row.intro">{{ row.intro }}</div>
+                      </div>
+                    </div>
+                  </template>
                 </el-table-column>
                 <!-- OI 看总分；ACM 看通过数与罚时（后端 totalScore 在 ACM 下恒为 0，不展示避免误解） -->
                 <el-table-column v-if="contest.type === 1" label="总分" prop="totalScore" width="100" align="center" />
@@ -239,6 +250,34 @@ onMounted(load)
 
 .link:hover {
   color: var(--oj-primary);
+}
+
+.rank-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rank-user-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.rank-user-name {
+  font-weight: 500;
+}
+
+/* 简介超长时单行省略，避免撑高表格行 */
+.rank-user-intro {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--oj-text-secondary, #909399);
 }
 
 .table-pager {

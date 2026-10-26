@@ -39,6 +39,11 @@ public class ContestRankVO implements Serializable {
     private String avatar;
 
     /**
+     * 个人简介（用户服务批量补充，前端超长截断展示）
+     */
+    private String intro;
+
+    /**
      * 通过题数（ACM 赛制）
      */
     private Integer acceptCount;

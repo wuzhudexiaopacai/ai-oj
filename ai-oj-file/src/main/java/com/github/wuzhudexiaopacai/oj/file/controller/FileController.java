@@ -38,6 +38,12 @@ public class FileController {
 
     private final FileService fileService;
 
+    @Operation(summary = "上传头像（仅图片，最大 2MB）")
+    @PostMapping("/avatar")
+    public Result<String> uploadAvatar(@RequestPart("file") MultipartFile file) {
+        return Result.ok(fileService.uploadAvatar(file));
+    }
+
     @Operation(summary = "初始化分片上传（秒传/断点续传）")
     @PostMapping("/upload/init")
     public Result<UploadInitVO> init(@Valid @RequestBody UploadInitRequest request) {

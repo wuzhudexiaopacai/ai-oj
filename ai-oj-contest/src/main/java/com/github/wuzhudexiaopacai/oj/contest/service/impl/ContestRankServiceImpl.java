@@ -144,6 +144,7 @@ public class ContestRankServiceImpl implements ContestRankService {
             if (brief != null) {
                 rank.setNickname(brief.getNickname());
                 rank.setAvatar(brief.getAvatar());
+                rank.setIntro(brief.getIntro());
                 if (!StringUtils.hasText(rank.getUsername())) {
                     rank.setUsername(brief.getUsername());
                 }

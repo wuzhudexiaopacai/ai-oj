@@ -43,12 +43,14 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -282,6 +284,61 @@ public class FileServiceImpl implements FileService {
                 .uploadedChunks(List.of())
                 .chunkSize(fileUploadProperties.getChunkSize())
                 .build();
+    }
+
+    /**
+     * 头像允许的图片类型与扩展名
+     */
+    private static final Map<String, String> AVATAR_CONTENT_TYPES = Map.of(
+            "image/jpeg", ".jpg",
+            "image/png", ".png",
+            "image/gif", ".gif",
+            "image/webp", ".webp");
+
+    /**
+     * 头像大小上限：2MB
+     */
+    private static final long AVATAR_MAX_SIZE = 2 * 1024 * 1024;
+
+    @Override
+    public String uploadAvatar(MultipartFile file) {
+        Asserts.notNull(file, "请选择要上传的图片");
+        Asserts.isTrue(!file.isEmpty(), "请选择要上传的图片");
+        Asserts.isTrue(file.getSize() <= AVATAR_MAX_SIZE, "头像大小不能超过 2MB");
+        String contentType = file.getContentType();
+        String ext = AVATAR_CONTENT_TYPES.get(contentType);
+        if (ext == null) {
+            // 部分客户端会上报 application/octet-stream，退化按文件扩展名判断
+            String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+            if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
+                ext = ".jpg";
+                contentType = "image/jpeg";
+            } else if (filename.endsWith(".png")) {
+                ext = ".png";
+                contentType = "image/png";
+            } else if (filename.endsWith(".gif")) {
+                ext = ".gif";
+                contentType = "image/gif";
+            } else if (filename.endsWith(".webp")) {
+                ext = ".webp";
+                contentType = "image/webp";
+            }
+        }
+        Asserts.notNull(ext, "仅支持 JPG / PNG / GIF / WEBP 格式的图片");
+        // 对象 key 用随机串，避免同名覆盖与路径猜测
+        String objectKey = "avatar/" + UUID.randomUUID().toString().replace("-", "") + ext;
+        try (InputStream in = file.getInputStream()) {
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(minioConfig.getPublicBucket())
+                    .object(objectKey)
+                    .stream(in, file.getSize(), -1)
+                    .contentType(contentType)
+                    .build());
+        } catch (Exception e) {
+            log.error("头像上传失败 objectKey={}", objectKey, e);
+            throw new BizException("头像上传失败，请稍后重试");
+        }
+        return "/files/" + objectKey;
     }
 
     @Override

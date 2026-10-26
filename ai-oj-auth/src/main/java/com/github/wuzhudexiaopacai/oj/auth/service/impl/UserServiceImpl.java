@@ -234,6 +234,7 @@ public class UserServiceImpl implements UserService {
             dto.setUsername(user.getUsername());
             dto.setNickname(user.getNickname());
             dto.setAvatar(user.getAvatar());
+            dto.setIntro(user.getIntro());
             return dto;
         }).toList();
     }

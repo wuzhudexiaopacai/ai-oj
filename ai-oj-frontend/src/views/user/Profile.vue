@@ -8,12 +8,23 @@
       <div class="profile-grid">
         <div class="oj-card info-card">
           <div class="avatar-row">
-            <el-avatar :size="72" :src="userStore.userInfo?.avatar">
-              {{ userStore.nickname.charAt(0).toUpperCase() }}
-            </el-avatar>
+            <el-upload
+              class="avatar-upload"
+              :show-file-list="false"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              :before-upload="beforeAvatarUpload"
+              :http-request="doUploadAvatar"
+              :disabled="uploadingAvatar"
+            >
+              <el-avatar :size="72" :src="profileForm.avatar">
+                {{ userStore.nickname.charAt(0).toUpperCase() }}
+              </el-avatar>
+              <div v-loading="uploadingAvatar" class="avatar-mask">更换头像</div>
+            </el-upload>
             <div>
               <div class="nickname">{{ userStore.nickname }}</div>
               <div class="oj-muted">@{{ userStore.userInfo?.username }}</div>
+              <div class="oj-muted avatar-tip">支持 JPG / PNG / GIF / WEBP，不超过 2MB</div>
             </div>
           </div>
           <el-descriptions :column="1" border class="info-desc">
@@ -66,16 +77,25 @@ import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { updateProfile, updatePassword } from '@/api/modules/auth'
+import { uploadAvatar } from '@/api/modules/file'
 import { formatTime } from '@/utils/format'
 
 const userStore = useUserStore()
 
+/** 头像大小上限：2MB */
+const AVATAR_MAX_SIZE = 2 * 1024 * 1024
+/** 头像允许的图片类型 */
+const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
 const profileForm = reactive({
   nickname: userStore.userInfo?.nickname || '',
   email: userStore.userInfo?.email || '',
+  avatar: userStore.userInfo?.avatar || '',
   // 后端字段名为 intro（个人简介），不是 bio
   intro: userStore.userInfo?.intro || ''
 })
+
+const uploadingAvatar = ref(false)
 
 const pwdFormRef = ref(null)
 const pwdForm = reactive({ oldPassword: '', newPassword: '' })
@@ -89,6 +109,32 @@ const pwdRules = {
 
 const savingProfile = ref(false)
 const savingPwd = ref(false)
+
+/** 上传前校验：只允许常见图片格式且不超过 2MB */
+function beforeAvatarUpload(file) {
+  if (!AVATAR_TYPES.includes(file.type)) {
+    ElMessage.error('仅支持 JPG / PNG / GIF / WEBP 格式的图片')
+    return false
+  }
+  if (file.size > AVATAR_MAX_SIZE) {
+    ElMessage.error('头像大小不能超过 2MB')
+    return false
+  }
+  return true
+}
+
+/** 上传头像：先存文件服务，再把返回地址写入个人资料 */
+async function doUploadAvatar({ file }) {
+  uploadingAvatar.value = true
+  try {
+    profileForm.avatar = await uploadAvatar(file)
+    await updateProfile(profileForm)
+    await userStore.fetchUserInfo().catch(() => {})
+    ElMessage.success('头像已更新')
+  } finally {
+    uploadingAvatar.value = false
+  }
+}
 
 async function onSaveProfile() {
   savingProfile.value = true
@@ -118,6 +164,7 @@ onMounted(() => {
   userStore.fetchUserInfo().then((info) => {
     profileForm.nickname = info.nickname || ''
     profileForm.email = info.email || ''
+    profileForm.avatar = info.avatar || ''
     profileForm.intro = info.intro || ''
   }).catch(() => {})
 })
@@ -141,6 +188,37 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+/* 头像上传：悬浮显示「更换头像」遮罩 */
+.avatar-upload {
+  position: relative;
+  display: inline-flex;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.avatar-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.avatar-upload:hover .avatar-mask {
+  opacity: 1;
+}
+
+.avatar-tip {
+  margin-top: 4px;
+  font-size: 12px;
 }
 
 .nickname {
