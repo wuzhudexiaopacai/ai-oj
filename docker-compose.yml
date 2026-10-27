@@ -14,6 +14,7 @@ volumes:
   es-data:
   ai-oj-work:
   rocketmq-data:
+  filebeat-data:
 
 # 微服务公共环境变量（Nacos 3.x 默认开启鉴权，默认账号 nacos/nacos）
 x-app-env: &app-env
@@ -110,6 +111,22 @@ services:
       - ai-oj-net
     restart: unless-stopped
 
+  # RocketMQ 控制台（Dashboard）：查看 Topic / 消费组 / 消息轨迹等
+  # 访问 http://localhost:18080（避开已占用的 80/8088/8848 等端口）
+  rocketmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:latest
+    container_name: ai-oj-rocketmq-dashboard
+    depends_on:
+      - rocketmq-namesrv
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876 -Xms256m -Xmx256m"
+    ports:
+      # 镜像内 Dashboard 默认监听 8082
+      - "18080:8082"
+    networks:
+      - ai-oj-net
+    restart: unless-stopped
+
   minio:
     image: cgr.dev/chainguard/minio:latest
     container_name: ai-oj-minio
@@ -174,6 +191,44 @@ services:
       - "9200:9200"
     volumes:
       - es-data:/usr/share/elasticsearch/data
+    networks:
+      - ai-oj-net
+    restart: unless-stopped
+
+  # ======================== 统一日志（ELK） ========================
+  # 采集全部容器 stdout/stderr -> Elasticsearch（ai-oj-logs-* 按天索引），Kibana 查询
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.19.21
+    container_name: ai-oj-filebeat
+    # 读取 docker.sock 与容器日志目录需要 root
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./docker/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # 记录采集位点，重启后从断点继续
+      - filebeat-data:/usr/share/filebeat/data
+    networks:
+      - ai-oj-net
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.21
+    container_name: ai-oj-kibana
+    depends_on:
+      - elasticsearch
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      # ES 已关闭安全认证，Kibana 同步关闭
+      XPACK_SECURITY_ENABLED: "false"
+      I18N_LOCALE: zh-CN
+      # 限制 Node 堆，避免占满 Docker Desktop 内存
+      NODE_OPTIONS: "--max-old-space-size=768"
+    ports:
+      - "5601:5601"
     networks:
       - ai-oj-net
     restart: unless-stopped

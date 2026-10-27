@@ -21,19 +21,20 @@ public class SessionCreateDTO implements Serializable {
      * 场景：chat/hint/review/generate
      */
     @NotBlank(message = "场景不能为空")
-    @Schema(description = "场景编码：chat/hint/review/generate", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "场景编码：chat 自由对话 / hint 解题提示 / review 代码评审 / generate AI 出题", example = "hint",
+            requiredMode = Schema.RequiredMode.REQUIRED)
     private String scene;
 
     /**
      * 关联题目（可为空）
      */
-    @Schema(description = "关联题目 ID（可为空）")
+    @Schema(description = "关联题目 ID（可为空），为空表示通用对话", example = "1001")
     private Long problemId;
 
     /**
      * 会话标题（可空，默认按场景生成）
      */
     @Size(max = 128, message = "会话标题长度不能超过 128")
-    @Schema(description = "会话标题")
+    @Schema(description = "会话标题，最长 128 字符；为空时按场景生成默认标题", example = "背包问题求解")
     private String title;
 }

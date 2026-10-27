@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.common.core.result;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -12,14 +13,19 @@ import java.io.Serializable;
  * @since 1.0
  */
 @Data
+@Schema(description = "统一返回体：code=200 表示成功，其余为业务失败码，data 为业务数据")
 public class Result<T> implements Serializable {
 
+    @Schema(description = "业务状态码：200 成功，400 参数错误，401 未登录，403 无权限，500 服务异常", example = "200")
     private int code;
 
+    @Schema(description = "提示信息，成功时固定为 success，失败时为具体原因", example = "success")
     private String message;
 
+    @Schema(description = "业务数据，失败时为 null")
     private T data;
 
+    @Schema(description = "服务端响应时间戳（epoch 毫秒）", example = "1735660800000")
     private long timestamp = System.currentTimeMillis();
 
     public static <T> Result<T> ok() {

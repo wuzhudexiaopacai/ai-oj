@@ -20,6 +20,12 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- OpenAPI 注解：分页返回体 PageResult 与实体基类的字段说明 -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

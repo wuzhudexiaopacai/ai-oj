@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -23,23 +24,27 @@ public class BaseEntity implements Serializable {
      * 主键（雪花算法）
      */
     @TableId(type = IdType.ASSIGN_ID)
+    @Schema(description = "主键（雪花 ID，19 位，前端按字符串处理）", example = "1950000000000000001")
     private Long id;
 
     /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)
+    @Schema(description = "创建时间", example = "2026-10-27T22:57:45")
     private LocalDateTime createTime;
 
     /**
      * 更新时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
+    @Schema(description = "更新时间", example = "2026-10-27T22:57:45")
     private LocalDateTime updateTime;
 
     /**
      * 逻辑删除标记：0 正常 1 已删除
      */
     @TableLogic
+    @Schema(description = "逻辑删除标记：0 正常 1 已删除（查询时自动过滤已删除数据）", example = "0")
     private Integer deleted;
 }

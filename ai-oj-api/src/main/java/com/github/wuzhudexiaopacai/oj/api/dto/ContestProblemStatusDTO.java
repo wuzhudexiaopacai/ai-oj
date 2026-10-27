@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.api.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -13,15 +14,18 @@ import java.util.List;
  * @since 1.0
  */
 @Data
+@Schema(description = "用户在指定比赛内的题目通过状态（按 contestId 独立统计，不含赛前提交）")
 public class ContestProblemStatusDTO implements Serializable {
 
     /**
      * 该比赛内已通过的题目 ID
      */
+    @Schema(description = "该比赛内已通过的题目 ID 列表", example = "[10001,10002]")
     private List<Long> solvedIds = new ArrayList<>();
 
     /**
      * 该比赛内提交过的题目 ID（含未通过）
      */
+    @Schema(description = "该比赛内提交过的题目 ID 列表（含未通过）", example = "[10001,10002,10003]")
     private List<Long> attemptedIds = new ArrayList<>();
 }

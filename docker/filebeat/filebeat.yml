@@ -1,0 +1,48 @@
+# =============================================================
+# Filebeat：采集全部 Docker 容器日志 -> Elasticsearch
+# 日志索引：ai-oj-logs-YYYY.MM.dd，Kibana 数据视图 ai-oj-logs-*
+# @author wuzhudexiaopacai
+# =============================================================
+filebeat.autodiscover:
+  providers:
+    # 通过 Docker socket 自动发现容器，无需为每个服务单独配置路径
+    - type: docker
+      hints.enabled: false
+      templates:
+        - condition:
+            # 排除自身，避免把采集器的日志再采集一遍
+            not:
+              contains:
+                docker.container.name: ai-oj-filebeat
+          config:
+            - type: container
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+              # 容器名作为服务标识，Kibana 中可按 container_name 过滤
+              # 注意不能叫 service：ECS 中 service 是对象，根级字符串会与模板映射冲突导致整批写入失败
+              fields:
+                container_name: ${data.docker.container.name}
+              fields_under_root: true
+
+processors:
+  # 标记运行环境，便于后续区分 compose / 本地开发
+  - add_fields:
+      target: ''
+      fields:
+        env: docker
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  # 8.x 使用 data stream 模式：该名称即数据流名，底层按日期滚动为 .ds-ai-oj-logs-*
+  index: "ai-oj-logs"
+
+# Filebeat 8.x 默认用 data stream 模板；显式声明保证模板 pattern 能匹配上面的数据流名
+setup.ilm.enabled: false
+setup.template.type: data_stream
+setup.template.name: "ai-oj-logs"
+setup.template.pattern: "ai-oj-logs*"
+setup.template.overwrite: true
+
+logging:
+  level: info
+  to_files: false

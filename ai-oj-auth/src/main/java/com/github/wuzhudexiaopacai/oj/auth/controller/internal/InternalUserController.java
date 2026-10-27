@@ -7,6 +7,8 @@ import com.github.wuzhudexiaopacai.oj.common.core.constant.CommonConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.core.result.ResultCode;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,6 +26,7 @@ import java.util.List;
  * @author wuzhudexiaopacai
  * @since 1.0
  */
+@Tag(name = "内部接口-用户", description = "服务间 Feign 调用，仅供内部使用，不对外暴露")
 @RestController
 @RequestMapping("/internal/user")
 @RequiredArgsConstructor
@@ -37,6 +40,8 @@ public class InternalUserController implements AuthFeignClient {
      * @param userIds 用户 ID 列表
      * @return 用户简要信息
      */
+    @Operation(summary = "批量获取用户简要信息",
+            description = "供 contest 服务（比赛排行榜聚合）通过 Feign 调用，按用户 ID 批量返回 ID、登录名、昵称、头像与简介。空列表直接返回空集合，重复 ID 自动去重；调用方必须携带网关注入的内部调用标识头，否则返回 403。")
     @Override
     @PostMapping("/batch-brief")
     public Result<List<UserBriefDTO>> batchGetUserBrief(@RequestBody List<Long> userIds) {
