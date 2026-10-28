@@ -47,6 +47,24 @@
               <span class="problem-title">{{ row.title }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="标签" min-width="180">
+            <template #default="{ row }">
+              <template v-if="row.tags && row.tags.length">
+                <el-tag
+                  v-for="tag in row.tags"
+                  :key="tag.id"
+                  size="small"
+                  effect="plain"
+                  round
+                  class="problem-tag"
+                  :style="tag.color ? { color: tag.color, borderColor: tag.color } : {}"
+                >
+                  {{ tag.name }}
+                </el-tag>
+              </template>
+              <span v-else class="oj-muted">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="难度" width="90" align="center">
             <template #default="{ row }">
               <DifficultyTag :difficulty="row.difficulty" />
@@ -171,6 +189,14 @@ onMounted(() => {
 .problem-title {
   color: var(--oj-text-primary);
   font-weight: 500;
+}
+
+.problem-tag {
+  margin-right: 6px;
+}
+
+.problem-tag:last-child {
+  margin-right: 0;
 }
 
 .el-table :deep(tbody tr) {
