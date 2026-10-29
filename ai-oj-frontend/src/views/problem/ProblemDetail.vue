@@ -2,7 +2,7 @@
   <div class="problem-page">
     <div class="split">
       <!-- 左侧：题目描述 -->
-      <div class="pane pane-left oj-card">
+      <div class="pane pane-left oj-card oj-reveal">
         <div v-loading="loading" class="desc">
           <template v-if="problem">
             <div class="title-row">
@@ -46,7 +46,7 @@
       </div>
 
       <!-- 右侧：代码编辑 + 提交 -->
-      <div class="pane pane-right">
+      <div class="pane pane-right oj-reveal" style="--reveal-delay: 0.08s">
         <div class="oj-card editor-card">
           <div class="editor-toolbar">
             <el-select v-model="language" style="width: 150px" @change="onLanguageChange">
@@ -56,7 +56,7 @@
           </div>
           <CodeEditor v-model="code" :language="monacoLanguage" :height="editorHeight" />
           <div class="editor-actions">
-            <el-button :icon="MagicStick" @click="aiVisible = true">AI 助手</el-button>
+            <el-button :icon="MagicStick" @click="assistant.show()">AI 助手</el-button>
             <el-button
               type="primary"
               :loading="submitting"
@@ -112,11 +112,6 @@
         </div>
       </div>
     </div>
-
-    <!-- AI 助手抽屉 -->
-    <el-drawer v-model="aiVisible" title="AI 智能助手" size="440px">
-      <AiChat :problem="problem" :code="code" :language="language" />
-    </el-drawer>
   </div>
 </template>
 
@@ -135,11 +130,12 @@ import MarkdownView from '@/components/MarkdownView.vue'
 import DifficultyTag from '@/components/DifficultyTag.vue'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
 import MySubmissions from './MySubmissions.vue'
-import AiChat from './AiChat.vue'
+import { useAssistantStore } from '@/stores/assistant'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const assistant = useAssistantStore()
 
 const loading = ref(false)
 const problem = ref(null)
@@ -151,7 +147,6 @@ const editorHeight = Math.max(320, Math.floor(window.innerHeight * 0.55))
 
 const submitting = ref(false)
 const result = ref(null)
-const aiVisible = ref(false)
 const submissionsRef = ref(null)
 
 let pollTimer = null
@@ -266,7 +261,19 @@ function pollResult(submitId) {
 }
 
 onMounted(load)
-onBeforeUnmount(() => clearTimeout(pollTimer))
+onBeforeUnmount(() => {
+  clearTimeout(pollTimer)
+  assistant.clearContext()
+  // 离开题目页后隐藏悬浮球与面板，再次点击“AI 助手”才会出现
+  assistant.hide()
+})
+
+// 将题目与编辑器实时状态同步给全局 AI 助手悬浮球
+watch(
+  [problem, code, language],
+  () => assistant.setContext({ problem: problem.value, code: code.value, language: language.value }),
+  { immediate: true }
+)
 
 watch(
   () => route.params.id,
@@ -438,7 +445,7 @@ watch(
 .case-label {
   margin-bottom: 4px;
   font-size: 12px;
-  color: var(--oj-text-secondary, #909399);
+  color: var(--oj-text-secondary);
 }
 
 .case-pre {
