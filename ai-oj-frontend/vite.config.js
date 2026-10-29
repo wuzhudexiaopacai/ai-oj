@@ -16,12 +16,12 @@ export default defineConfig({
     proxy: {
       // 本地开发代理到网关
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:8088',
         changeOrigin: true
       },
       // WebSocket（判题进度 / 比赛时间实时推送）
       '/ws': {
-        target: 'ws://localhost:8080',
+        target: 'ws://localhost:8088',
         ws: true,
         changeOrigin: true
       },
