@@ -65,6 +65,11 @@ public class MqConstants {
     public static final String GROUP_CONTEST_RECORD = "ai-oj-contest-record-consumer";
 
     /**
+     * 判题结果消费组（用户提交/通过统计）
+     */
+    public static final String GROUP_USER_STAT = "ai-oj-user-stat-consumer";
+
+    /**
      * 题目 ES 同步消费组
      */
     public static final String GROUP_PROBLEM_ES = "ai-oj-problem-es-consumer";
