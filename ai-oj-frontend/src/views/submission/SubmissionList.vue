@@ -1,11 +1,14 @@
 <template>
   <div class="oj-page">
     <div class="oj-container">
-      <div class="oj-page-header">
-        <h2 class="oj-page-title">我的提交记录</h2>
+      <div class="oj-page-header oj-reveal">
+        <div>
+          <h2 class="oj-page-title">我的提交记录</h2>
+          <p class="oj-page-desc">可按状态、语言与时间范围检索历史提交，点击行查看判题详情</p>
+        </div>
       </div>
 
-      <div class="oj-card table-card">
+      <div class="oj-card table-card oj-reveal" style="--reveal-delay: 0.08s">
         <SubmissionFilter @search="onFilterSearch" />
         <el-table
           v-loading="loading"
@@ -254,8 +257,8 @@ onMounted(() => load())
   padding: 12px 14px;
   border-radius: 6px;
   background: var(--oj-bg-page);
-  border-left: 3px solid var(--oj-danger, #f56c6c);
-  color: var(--oj-danger, #f56c6c);
+  border-left: 3px solid var(--oj-danger);
+  color: var(--oj-danger);
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;

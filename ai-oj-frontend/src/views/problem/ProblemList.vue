@@ -1,8 +1,11 @@
 <template>
   <div class="oj-page">
     <div class="oj-container">
-      <div class="oj-page-header">
-        <h2 class="oj-page-title">题库</h2>
+      <div class="oj-page-header oj-reveal">
+        <div>
+          <h2 class="oj-page-title">题库</h2>
+          <p class="oj-page-desc">按难度与关键词检索题目，支持在线提交与多语言评测</p>
+        </div>
         <div class="filters">
           <el-select
             v-model="query.difficulty"
@@ -28,7 +31,7 @@
         </div>
       </div>
 
-      <div class="oj-card table-card">
+      <div class="oj-card table-card oj-reveal" style="--reveal-delay: 0.08s">
         <el-table v-loading="loading" :data="list" @row-click="goDetail">
           <el-table-column label="状态" width="92" align="center">
             <template #default="{ row }">

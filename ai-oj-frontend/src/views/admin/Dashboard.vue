@@ -1,11 +1,17 @@
 <template>
   <div class="dashboard">
-    <!-- 统计卡片 -->
+    <!-- 统计卡片：中性图标底，hover 统一过渡为品牌色，与首页能力卡同一套语言 -->
     <el-row :gutter="16">
-      <el-col v-for="card in statCards" :key="card.label" :xs="12" :sm="12" :md="6">
-        <div class="oj-card stat-card" @click="$router.push(card.to)">
-          <div class="stat-icon" :style="{ background: card.bg }">
-            <el-icon :size="24" :color="card.color"><component :is="card.icon" /></el-icon>
+      <el-col
+        v-for="(card, i) in statCards"
+        :key="card.label"
+        :xs="12"
+        :sm="12"
+        :md="6"
+      >
+        <div class="oj-card stat-card oj-reveal" :style="{ '--reveal-delay': `${i * 0.06}s` }" @click="$router.push(card.to)">
+          <div class="stat-icon">
+            <el-icon :size="24"><component :is="card.icon" /></el-icon>
           </div>
           <div class="stat-info">
             <div class="stat-value">{{ card.value }}</div>
@@ -17,7 +23,7 @@
     </el-row>
 
     <!-- 快捷操作 -->
-    <div class="oj-card section-card">
+    <div class="oj-card section-card oj-reveal" style="--reveal-delay: 0.1s">
       <div class="section-title">快捷操作</div>
       <div class="quick-actions">
         <el-button type="primary" :icon="Plus" @click="$router.push('/admin/problem/create')">
@@ -30,7 +36,7 @@
     </div>
 
     <!-- 系统状态 -->
-    <div class="oj-card section-card">
+    <div class="oj-card section-card oj-reveal" style="--reveal-delay: 0.16s">
       <div class="section-head">
         <span class="section-title">服务状态</span>
         <el-button text size="small" :icon="Refresh" :loading="healthLoading" @click="loadHealth">
@@ -93,22 +99,10 @@ const router = useRouter()
 const stats = ref({ userTotal: 0, problemTotal: 0, submissionTotal: 0, contestTotal: 0 })
 
 const statCards = computed(() => [
-  {
-    label: '注册用户', value: stats.value.userTotal, icon: User, to: '/admin/user',
-    color: '#409eff', bg: 'rgba(64, 158, 255, 0.12)'
-  },
-  {
-    label: '题目数量', value: stats.value.problemTotal, icon: Collection, to: '/admin/problem',
-    color: '#67c23a', bg: 'rgba(103, 194, 58, 0.12)'
-  },
-  {
-    label: '提交总数', value: stats.value.submissionTotal, icon: Document, to: '/submission',
-    color: '#e6a23c', bg: 'rgba(230, 162, 60, 0.12)'
-  },
-  {
-    label: '比赛场次', value: stats.value.contestTotal, icon: Trophy, to: '/admin/contest',
-    color: '#f56c6c', bg: 'rgba(245, 108, 108, 0.12)'
-  }
+  { label: '注册用户', value: stats.value.userTotal, icon: User, to: '/admin/user' },
+  { label: '题目数量', value: stats.value.problemTotal, icon: Collection, to: '/admin/problem' },
+  { label: '提交总数', value: stats.value.submissionTotal, icon: Document, to: '/submission' },
+  { label: '比赛场次', value: stats.value.contestTotal, icon: Trophy, to: '/admin/contest' }
 ])
 
 // ==================== 服务健康检查 ====================
@@ -195,23 +189,41 @@ onMounted(async () => {
   gap: 14px;
   padding: 18px 20px;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform var(--oj-duration) var(--oj-ease),
+    box-shadow var(--oj-duration) var(--oj-ease),
+    border-color var(--oj-duration) var(--oj-ease);
   margin-bottom: 16px;
 }
 
 .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--oj-shadow-hover);
+  border-color: var(--oj-border-strong);
 }
 
 .stat-icon {
   width: 48px;
   height: 48px;
-  border-radius: 10px;
+  border-radius: var(--oj-radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  background: var(--oj-bg-fill);
+  color: var(--oj-text-regular);
+  transition:
+    background-color var(--oj-duration) var(--oj-ease),
+    color var(--oj-duration) var(--oj-ease);
+}
+
+.stat-card:hover .stat-icon {
+  background: var(--oj-primary-soft);
+  color: var(--oj-primary-active);
+}
+
+html[data-theme='dark'] .stat-card:hover .stat-icon {
+  color: var(--oj-primary);
 }
 
 .stat-info {
@@ -231,7 +243,7 @@ onMounted(async () => {
 }
 
 .stat-arrow {
-  color: var(--oj-text-placeholder, #c0c4cc);
+  color: var(--oj-text-placeholder);
 }
 
 .section-card {
@@ -286,13 +298,13 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
+/* 健康状态点：纯色小圆点，去掉霓虹光晕 */
 .health-dot.ok {
-  background: var(--oj-success, #67c23a);
-  box-shadow: 0 0 6px rgba(103, 194, 58, 0.6);
+  background: var(--oj-success);
 }
 
 .health-dot.down {
-  background: var(--oj-danger, #f56c6c);
+  background: var(--oj-danger);
 }
 
 .health-name {

@@ -1,16 +1,20 @@
 <template>
   <div class="oj-page">
     <div class="oj-container">
-      <div class="oj-page-header">
-        <h2 class="oj-page-title">比赛</h2>
+      <div class="oj-page-header oj-reveal">
+        <div>
+          <h2 class="oj-page-title">赛事中心</h2>
+          <p class="oj-page-desc">周期性竞赛与实时榜单，支持 ACM / OI 两种赛制</p>
+        </div>
       </div>
 
       <div v-loading="loading">
         <div v-if="list.length" class="contest-grid">
           <div
-            v-for="c in list"
+            v-for="(c, i) in list"
             :key="c.id"
-            class="oj-card contest-card"
+            class="oj-card contest-card oj-reveal"
+            :style="{ '--reveal-delay': `${0.08 + Math.min(i, 6) * 0.05}s` }"
             @click="$router.push(`/contest/${c.id}`)"
           >
             <div class="contest-head">
@@ -91,11 +95,17 @@ onMounted(load)
 
 .contest-card {
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  /* 与全局动效令牌同一缓动，hover 上浮克制无弹跳 */
+  transition:
+    transform var(--oj-duration) var(--oj-ease),
+    box-shadow var(--oj-duration) var(--oj-ease),
+    border-color var(--oj-duration) var(--oj-ease);
 }
 
 .contest-card:hover {
   transform: translateY(-2px);
+  box-shadow: var(--oj-shadow-hover);
+  border-color: var(--oj-border-strong);
 }
 
 .contest-head {

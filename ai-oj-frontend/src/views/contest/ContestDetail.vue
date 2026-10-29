@@ -2,7 +2,7 @@
   <div class="oj-page">
     <div class="oj-container" v-loading="loading">
       <template v-if="contest">
-        <div class="oj-card head-card">
+        <div class="oj-card head-card oj-reveal">
           <div class="head-main">
             <h2 class="oj-page-title">{{ contest.title }}</h2>
             <div class="oj-muted head-meta">
@@ -16,16 +16,15 @@
           <el-button
             v-else-if="userStore.isLogin"
             type="primary"
-            round
             :loading="registering"
             @click="onRegister"
           >
-            立即报名
+            报名参赛
           </el-button>
-          <el-button v-else round @click="$router.push('/login')">登录后报名</el-button>
+          <el-button v-else @click="$router.push('/login')">登录后报名</el-button>
         </div>
 
-        <div class="oj-card body-card">
+        <div class="oj-card body-card oj-reveal" style="--reveal-delay: 0.08s">
           <el-tabs v-model="tab">
             <el-tab-pane label="比赛说明" name="desc">
               <MarkdownView :content="contest.description || '暂无说明'" />
@@ -582,7 +581,7 @@ onBeforeUnmount(disposeChart)
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: var(--oj-text-secondary, #909399);
+  color: var(--oj-text-secondary);
 }
 
 .rank-toolbar {
@@ -611,7 +610,7 @@ onBeforeUnmount(disposeChart)
 
 /* 排名表中「我」所在行高亮 */
 :deep(.rank-me-row) {
-  background: var(--el-color-warning-light-9, #fdf6ec);
+  background: var(--el-color-warning-light-9);
 }
 
 @media (max-width: 720px) {

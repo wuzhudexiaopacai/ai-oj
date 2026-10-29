@@ -1,20 +1,23 @@
 <template>
   <div class="oj-page">
     <div class="oj-container">
-      <div class="oj-page-header">
-        <h2 class="oj-page-title">个人中心</h2>
+      <div class="oj-page-header oj-reveal">
+        <div>
+          <h2 class="oj-page-title">个人中心</h2>
+          <p class="oj-page-desc">查看做题概览、参赛记录与近期提交动态</p>
+        </div>
       </div>
 
       <div class="profile-layout">
         <!-- 左侧：身份信息（窄栏，资料编辑移到独立页面） -->
-        <aside class="oj-card side-card">
+        <aside class="oj-card side-card oj-reveal">
           <el-avatar :size="88" :src="userStore.userInfo?.avatar" class="side-avatar">
             {{ userStore.nickname.charAt(0).toUpperCase() }}
           </el-avatar>
           <div class="side-name">{{ userStore.nickname }}</div>
           <div class="side-username">@{{ userStore.userInfo?.username || '-' }}</div>
           <p v-if="userStore.userInfo?.intro" class="side-intro">{{ userStore.userInfo.intro }}</p>
-          <el-button class="side-edit" round @click="router.push('/user/settings')">编辑个人资料</el-button>
+          <el-button class="side-edit" @click="router.push('/user/settings')">编辑个人资料</el-button>
 
           <div class="side-stats">
             <div class="side-stat">
@@ -44,7 +47,7 @@
         </aside>
 
         <!-- 右侧：卡片主栏 -->
-        <main class="profile-main">
+        <main class="profile-main oj-reveal" style="--reveal-delay: 0.08s">
           <!-- 做题概览 -->
           <div class="oj-card overview-card">
             <div class="donut" :style="donutStyle">
@@ -235,7 +238,7 @@ const solvedPercent = computed(() =>
   attemptedCount.value ? Math.round((solvedCount.value / attemptedCount.value) * 100) : 0
 )
 const donutStyle = computed(() => ({
-  background: `conic-gradient(var(--oj-primary) 0 ${solvedPercent.value}%, var(--el-fill-color-light, #f0f2f5) ${solvedPercent.value}% 100%)`
+  background: `conic-gradient(var(--oj-primary) 0 ${solvedPercent.value}%, var(--el-fill-color-light) ${solvedPercent.value}% 100%)`
 }))
 
 /** 连续提交天数：今天有提交从今天算起，否则从昨天算起 */
@@ -676,7 +679,7 @@ onBeforeUnmount(() => {
 }
 
 .recent-item:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: var(--el-fill-color-light);
 }
 
 .recent-title {
@@ -723,7 +726,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   font-size: 12px;
-  color: var(--oj-text-secondary, #8c8c8c);
+  color: var(--oj-text-secondary);
 }
 
 .heatmap-box {
@@ -773,7 +776,7 @@ onBeforeUnmount(() => {
 
 .list-count {
   font-size: 12px;
-  color: var(--oj-text-secondary, #8c8c8c);
+  color: var(--oj-text-secondary);
 }
 
 .contest-cell {
@@ -826,7 +829,7 @@ onBeforeUnmount(() => {
 }
 
 .passed-item:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: var(--el-fill-color-light);
 }
 
 .passed-title {

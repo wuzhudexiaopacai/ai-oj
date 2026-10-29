@@ -163,7 +163,7 @@ function onUserCommand(command) {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border-bottom: 1px solid var(--oj-border);
+  border-bottom: 1px solid var(--oj-divider);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -174,9 +174,10 @@ function onUserCommand(command) {
 }
 
 .logo-text {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--oj-primary);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--oj-text-primary);
+  letter-spacing: 0.5px;
   white-space: nowrap;
 }
 
@@ -184,14 +185,40 @@ function onUserCommand(command) {
   flex: 1;
   border-right: none;
   background: transparent;
+  padding: 8px;
+  --el-menu-text-color: var(--oj-text-regular);
+  --el-menu-active-color: var(--oj-primary);
+  --el-menu-hover-bg-color: var(--oj-bg-fill);
 }
 
 .aside-menu:not(.el-menu--collapse) {
   width: 100%;
 }
 
+/* 激活项：品牌色文字 + 淡底纹 + 左侧指示条，取代默认纯文字高亮 */
 .aside-menu :deep(.el-menu-item) {
   background: transparent;
+  border-radius: var(--oj-radius);
+  margin-bottom: 2px;
+  font-size: 14px;
+  height: 42px;
+}
+
+.aside-menu :deep(.el-menu-item.is-active) {
+  background: var(--oj-primary-soft);
+  font-weight: 500;
+  position: relative;
+}
+
+.aside-menu :deep(.el-menu-item.is-active::before) {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  height: 50%;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--oj-primary);
 }
 
 .aside-footer {
@@ -199,10 +226,11 @@ function onUserCommand(command) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-top: 1px solid var(--oj-border);
+  border-top: 1px solid var(--oj-divider);
   cursor: pointer;
-  color: var(--oj-text-regular);
+  color: var(--oj-text-secondary);
   flex-shrink: 0;
+  transition: color 0.15s ease;
 }
 
 .aside-footer:hover {
@@ -248,8 +276,8 @@ function onUserCommand(command) {
 }
 
 .admin-main {
-  padding: 20px;
-  background: var(--oj-bg);
+  padding: 24px;
+  background: var(--oj-bg-page);
 }
 
 .fade-enter-active,

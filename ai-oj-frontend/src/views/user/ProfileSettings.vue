@@ -1,14 +1,17 @@
 <template>
   <div class="oj-page">
     <div class="oj-container">
-      <div class="oj-page-header">
-        <h2 class="oj-page-title">编辑个人资料</h2>
+      <div class="oj-page-header oj-reveal">
+        <div>
+          <h2 class="oj-page-title">编辑个人资料</h2>
+          <p class="oj-page-desc">维护昵称、联系方式与账号安全信息</p>
+        </div>
         <el-button text @click="goBack">
           <el-icon><ArrowLeft /></el-icon>返回个人中心
         </el-button>
       </div>
 
-      <div class="settings-grid">
+      <div class="settings-grid oj-reveal" style="--reveal-delay: 0.08s">
         <div class="oj-card">
           <h3 class="section-title">基本资料</h3>
           <div class="avatar-row">
@@ -217,7 +220,7 @@ onMounted(() => {
 
 .avatar-tip {
   font-size: 12px;
-  color: var(--oj-text-secondary, #8c8c8c);
+  color: var(--oj-text-secondary);
   line-height: 1.7;
 }
 

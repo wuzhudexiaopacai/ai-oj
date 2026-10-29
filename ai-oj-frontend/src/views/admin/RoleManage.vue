@@ -1,5 +1,5 @@
 <template>
-  <div class="role-manage">
+  <div class="role-manage oj-reveal">
     <el-tabs v-model="activeTab" class="page-tabs">
       <!-- ==================== 角色列表 ==================== -->
       <el-tab-pane label="角色管理" name="role">
@@ -26,7 +26,11 @@
 
         <el-card shadow="never" class="table-card">
           <el-table v-loading="loading" :data="list">
-            <el-table-column label="ID" prop="id" width="70" />
+            <el-table-column label="ID" width="185">
+              <template #default="{ row }">
+                <span class="id-cell">{{ row.id }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="角色编码" prop="code" width="180">
               <template #default="{ row }">
                 <el-tag effect="plain" size="small">{{ row.code }}</el-tag>

@@ -1,7 +1,7 @@
 <template>
   <div class="solve-page">
     <!-- 顶部工具条：返回比赛 + 比赛信息 + 实时倒计时 -->
-    <div class="solve-topbar oj-card">
+    <div class="solve-topbar oj-card oj-reveal">
       <div class="topbar-left">
         <el-button text :icon="ArrowLeft" @click="backToContest">返回比赛题目</el-button>
         <el-divider direction="vertical" />
@@ -30,7 +30,7 @@
 
     <div class="split">
       <!-- 左侧：题目描述 -->
-      <div class="pane pane-left oj-card">
+      <div class="pane pane-left oj-card oj-reveal" style="--reveal-delay: 0.06s">
         <div v-loading="loading" class="desc">
           <template v-if="problem">
             <div class="title-row">

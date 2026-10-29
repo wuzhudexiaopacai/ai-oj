@@ -1,5 +1,5 @@
 <template>
-  <div class="user-manage">
+  <div class="user-manage oj-reveal">
     <div class="toolbar">
       <div class="toolbar-left">
         <el-input
@@ -23,7 +23,11 @@
 
     <el-card shadow="never" class="table-card">
       <el-table v-loading="loading" :data="list">
-        <el-table-column label="ID" prop="id" width="70" />
+        <el-table-column label="ID" width="185">
+          <template #default="{ row }">
+            <span class="id-cell">{{ row.id }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="用户" min-width="180">
           <template #default="{ row }">
             <div class="user-cell">

@@ -1,7 +1,7 @@
 <template>
   <div class="problem-edit">
     <!-- 吸顶操作栏 -->
-    <div class="edit-header">
+    <div class="edit-header oj-reveal">
       <div class="header-left">
         <el-button :icon="ArrowLeft" text @click="goBack">返回</el-button>
         <span class="header-title">{{ isEdit ? `编辑题目 ${form.problemKey || ''}` : '新建题目' }}</span>
@@ -15,7 +15,7 @@
       </div>
     </div>
 
-    <div v-loading="loading" class="edit-body">
+    <div v-loading="loading" class="edit-body oj-reveal" style="--reveal-delay: 0.06s">
       <!-- 基本信息 -->
       <el-card shadow="never" class="section-card">
         <template #header>

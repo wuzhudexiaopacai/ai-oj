@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="oj-card toolbar-card">
+    <div class="oj-card toolbar-card oj-reveal">
       <div class="toolbar">
         <el-input
           v-model="query.keyword"
@@ -33,7 +33,7 @@
       </div>
     </div>
 
-    <div class="oj-card table-card">
+    <div class="oj-card table-card oj-reveal" style="--reveal-delay: 0.06s">
       <el-table v-loading="loading" :data="list" style="width: 100%">
         <el-table-column prop="problemKey" label="题号" width="110" />
         <el-table-column label="标题" min-width="220">
@@ -61,8 +61,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="时间/内存" width="120" align="center">
-          <template #default="{ row }">{{ row.timeLimit }}ms / {{ row.memoryLimit }}MB</template>
+        <el-table-column label="时间/内存" width="150" align="center">
+          <template #default="{ row }">
+            <span style="white-space: nowrap">{{ row.timeLimit }}ms / {{ row.memoryLimit }}MB</span>
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right" align="center">
           <template #default="{ row }">

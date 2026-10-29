@@ -1,14 +1,17 @@
 <template>
   <div class="oj-page">
     <div class="oj-container">
-      <div class="oj-page-header">
-        <h2 class="oj-page-title">我的记录</h2>
+      <div class="oj-page-header oj-reveal">
+        <div>
+          <h2 class="oj-page-title">我的记录</h2>
+          <p class="oj-page-desc">汇总参赛历史与解题通过记录</p>
+        </div>
         <el-button text @click="router.push('/user/profile')">
           <el-icon><ArrowLeft /></el-icon>返回个人中心
         </el-button>
       </div>
 
-      <div v-loading="loading" class="oj-card records-card">
+      <div v-loading="loading" class="oj-card records-card oj-reveal" style="--reveal-delay: 0.08s">
         <el-tabs v-model="activeTab">
           <el-tab-pane name="contest">
             <template #label>我的比赛（{{ myContests.length }}）</template>
@@ -350,7 +353,7 @@ onMounted(load)
 }
 
 .solved-item:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: var(--el-fill-color-light);
 }
 
 .solved-key {

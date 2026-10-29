@@ -1,5 +1,5 @@
 <template>
-  <div class="contest-manage">
+  <div class="contest-manage oj-reveal">
     <!-- 搜索/操作栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
@@ -17,7 +17,11 @@
     <!-- 比赛列表 -->
     <el-card shadow="never" class="table-card">
       <el-table v-loading="loading" :data="list">
-        <el-table-column label="ID" prop="id" width="80" />
+        <el-table-column label="ID" width="185">
+          <template #default="{ row }">
+            <span class="id-cell">{{ row.id }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="标题" min-width="220">
           <template #default="{ row }">
             <span class="contest-title">{{ row.title }}</span>
