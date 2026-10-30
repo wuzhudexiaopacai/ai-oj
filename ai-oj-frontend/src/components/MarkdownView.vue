@@ -23,6 +23,8 @@ import csharp from 'highlight.js/lib/languages/csharp'
 import sql from 'highlight.js/lib/languages/sql'
 import bash from 'highlight.js/lib/languages/bash'
 import json from 'highlight.js/lib/languages/json'
+import { ElMessage } from 'element-plus'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps({
   content: { type: String, default: '' }
@@ -113,34 +115,22 @@ function normalizeMath(src) {
 }
 
 /** 事件委托处理“复制代码”按钮（v-html 内容无法直接绑定 Vue 事件） */
-function onClick(e) {
+async function onClick(e) {
   const btn = e.target.closest('.code-copy')
   if (!btn) return
   const code = btn.closest('.code-block')?.querySelector('code')
   if (!code) return
-  copyText(code.textContent).then(() => {
-    btn.textContent = '已复制'
-    btn.classList.add('is-done')
-    setTimeout(() => {
-      btn.textContent = '复制'
-      btn.classList.remove('is-done')
-    }, 1500)
-  })
-}
-
-/** 剪贴板 API 在非安全上下文（http 且非 localhost）不可用，降级 execCommand */
-async function copyText(text) {
-  if (navigator.clipboard?.writeText && window.isSecureContext) {
-    await navigator.clipboard.writeText(text)
+  try {
+    await copyText(code.textContent)
+  } catch {
+    ElMessage.warning('复制失败，请手动选择内容复制')
     return
   }
-  const ta = document.createElement('textarea')
-  ta.value = text
-  ta.style.position = 'fixed'
-  ta.style.opacity = '0'
-  document.body.appendChild(ta)
-  ta.select()
-  document.execCommand('copy')
-  document.body.removeChild(ta)
+  btn.textContent = '已复制'
+  btn.classList.add('is-done')
+  setTimeout(() => {
+    btn.textContent = '复制'
+    btn.classList.remove('is-done')
+  }, 1500)
 }
 </script>
