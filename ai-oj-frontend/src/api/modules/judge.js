@@ -26,3 +26,14 @@ export function pageSubmissions(params) {
 export function getUserProblemStatus() {
   return request.get('/submission/user-problem-status')
 }
+
+/**
+ * 用例校验（AI 出题用参考代码逐组实跑，得到真实输出回填期望）
+ * 10 组顺序跑，耗时较长，超时放宽至 90s
+ *
+ * @param {object} data { language, code, timeLimitMs?, cases:[{seq,input,expectedOutput}] }
+ * @returns {Promise<{compileOk,compileLog,overallPassed,totalCount,passedCount,cases:[{seq,passed,actualOutput,expectedOutput,status,errorMessage,timeMs,memoryKb}]}>
+ */
+export function validateCases(data) {
+  return request.post('/judge/validate-cases', data, { timeout: 90000 })
+}

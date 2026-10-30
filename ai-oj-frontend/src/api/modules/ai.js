@@ -14,6 +14,17 @@ export function createAiSession(data) {
 }
 
 /**
+ * AI 出题（同步）：返回结构化题目草稿，供编辑页一键回填
+ *
+ * @param {object} data { topic, difficulty(0/1/2), requirement?, caseCount? }
+ * @returns {Promise<{title,description,inputDesc,outputDesc,hint,difficulty,timeLimit,memoryLimit,testCases:[{inputData,outputData}]}>}
+ */
+export function generateProblem(data) {
+  // 出题含参考代码+题解，大模型生成耗时长（可达分钟级），单独放宽超时
+  return request.post('/ai/generate', data, { timeout: 300000 })
+}
+
+/**
  * 流式对话（POST + SSE）
  *
  * <p>用 POST 而不是 GET：当前代码可能有数千行，放 URL 里会超出长度限制。</p>

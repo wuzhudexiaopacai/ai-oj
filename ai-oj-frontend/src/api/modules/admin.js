@@ -36,6 +36,11 @@ export function getAdminProblemDetail(id) {
   return request.get(`/admin/problem/${id}/detail`)
 }
 
+/** 生成下一个可用题号（前缀 + 数字递增，供新建表单自动填充） */
+export function nextProblemKey(prefix = 'A') {
+  return request.get('/admin/problem/next-key', { params: { prefix }, silent: true })
+}
+
 export function createProblem(data) {
   return request.post('/admin/problem', data)
 }
