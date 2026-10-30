@@ -6,6 +6,9 @@
 <script setup>
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
+import katex from 'katex'
+import texmath from 'markdown-it-texmath'
+import 'katex/dist/katex.min.css'
 import hljs from 'highlight.js/lib/core'
 // 只注册 OJ 常见语言，避免全量包体积
 import cpp from 'highlight.js/lib/languages/cpp'
@@ -62,6 +65,13 @@ const LANG_LABELS = {
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
+// LaTeX 数学公式：$...$ 行内、$$...$$ 块级（AI 题面常用），公式出错不阻断整篇渲染
+md.use(texmath, {
+  engine: katex,
+  delimiters: 'dollars',
+  katexOptions: { throwOnError: false, output: 'html' }
+})
+
 /**
  * 代码块渲染为独立卡片：头部（语言标签 + 复制按钮）+ 高亮正文。
  * 语言无法识别时退化为纯转义文本，保证内容完整可见。
@@ -84,7 +94,23 @@ md.renderer.rules.fence = (tokens, idx) => {
   )
 }
 
-const html = computed(() => md.render(props.content || ''))
+const html = computed(() => md.render(normalizeMath(props.content || '')))
+
+/**
+ * 数学公式规范化：AI 常把多行块级结构（cases / matrix / aligned 等）塞进行内 $...$，
+ * 而 KaTeX 行内定界符不跨行，导致这类公式原样显示。此处把“跨行或含 \begin/\end 环境”
+ * 的 $...$ 升级为独立的 $$...$$ 块级公式，交由 KaTeX displayMode 正确渲染。
+ */
+function normalizeMath(src) {
+  if (!src) return src
+  // 仅匹配单个 $ 包裹（排除已是 $$ 的块级）；[\S\s]*? 非贪婪、可跨行
+  return src.replace(/(?<!\$)\$(?!\$)([\s\S]*?)(?<!\$)\$(?!\$)/g, (m, body) => {
+    if (/\S/.test(body) && (body.includes('\n') || /\\(?:begin|end)\{/.test(body))) {
+      return `\n\n$$\n${body}\n$$\n\n`
+    }
+    return m
+  })
+}
 
 /** 事件委托处理“复制代码”按钮（v-html 内容无法直接绑定 Vue 事件） */
 function onClick(e) {
