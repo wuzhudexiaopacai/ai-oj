@@ -22,11 +22,17 @@
                   <h3 class="sample-title">示例</h3>
                   <div v-for="(s, i) in problem.samples" :key="i" class="sample">
                     <div class="sample-block">
-                      <div class="sample-label">输入</div>
+                      <div class="sample-label oj-copy-slot">
+                        <span>输入</span>
+                        <CopyButton :text="s.input" />
+                      </div>
                       <pre class="code-block">{{ s.input }}</pre>
                     </div>
                     <div class="sample-block">
-                      <div class="sample-label">输出</div>
+                      <div class="sample-label oj-copy-slot">
+                        <span>输出</span>
+                        <CopyButton :text="s.output" />
+                      </div>
                       <pre class="code-block">{{ s.output }}</pre>
                     </div>
                   </div>
@@ -81,7 +87,10 @@
             <span v-if="result.score != null">得分 {{ result.score }}</span>
           </div>
           <!-- 后端 SubmissionDetailVO 的编译/运行错误字段是 errorMessage -->
-          <pre v-if="result.errorMessage" class="compile-msg">{{ result.errorMessage }}</pre>
+          <div v-if="result.errorMessage" class="oj-copyable">
+            <pre class="compile-msg">{{ result.errorMessage }}</pre>
+            <CopyButton :text="result.errorMessage" title="复制错误信息" />
+          </div>
 
           <!-- 失败用例回显（仅普通题目提交：比赛提交后端不返回用例数据） -->
           <template v-if="failedCases.length">
@@ -96,15 +105,24 @@
                   <JudgeStatusTag :status="item.status" />
                 </template>
                 <div class="case-block">
-                  <div class="case-label">输入</div>
+                  <div class="case-label oj-copy-slot">
+                    <span>输入</span>
+                    <CopyButton :text="item.inputPreview" />
+                  </div>
                   <pre class="case-pre">{{ item.inputPreview || '（空）' }}</pre>
                 </div>
                 <div class="case-block">
-                  <div class="case-label">期望输出</div>
+                  <div class="case-label oj-copy-slot">
+                    <span>期望输出</span>
+                    <CopyButton :text="item.expectedPreview" />
+                  </div>
                   <pre class="case-pre">{{ item.expectedPreview || '（空）' }}</pre>
                 </div>
                 <div class="case-block">
-                  <div class="case-label">你的输出</div>
+                  <div class="case-label oj-copy-slot">
+                    <span>你的输出</span>
+                    <CopyButton :text="item.outputPreview" />
+                  </div>
                   <pre class="case-pre">{{ item.outputPreview || '（空）' }}</pre>
                 </div>
               </el-collapse-item>
@@ -130,6 +148,7 @@ import CodeEditor from '@/components/CodeEditor.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import DifficultyTag from '@/components/DifficultyTag.vue'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
+import CopyButton from '@/components/CopyButton.vue'
 import MySubmissions from './MySubmissions.vue'
 import { useAssistantStore } from '@/stores/assistant'
 

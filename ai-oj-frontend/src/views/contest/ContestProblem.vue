@@ -50,11 +50,17 @@
                   <h3 class="sample-title">示例</h3>
                   <div v-for="(s, i) in problem.samples" :key="i" class="sample">
                     <div class="sample-block">
-                      <div class="sample-label oj-muted">输入</div>
+                      <div class="sample-label oj-muted oj-copy-slot">
+                        <span>输入</span>
+                        <CopyButton :text="s.input" />
+                      </div>
                       <pre>{{ s.input }}</pre>
                     </div>
                     <div class="sample-block">
-                      <div class="sample-label oj-muted">输出</div>
+                      <div class="sample-label oj-muted oj-copy-slot">
+                        <span>输出</span>
+                        <CopyButton :text="s.output" />
+                      </div>
                       <pre>{{ s.output }}</pre>
                     </div>
                   </div>
@@ -101,7 +107,10 @@
             <span v-if="result.memoryUsed != null">内存 {{ formatMemory(result.memoryUsed) }}</span>
             <span v-if="result.score != null">得分 {{ result.score }}</span>
           </div>
-          <pre v-if="result.errorMessage" class="compile-msg">{{ result.errorMessage }}</pre>
+          <div v-if="result.errorMessage" class="oj-copyable">
+            <pre class="compile-msg">{{ result.errorMessage }}</pre>
+            <CopyButton :text="result.errorMessage" title="复制错误信息" />
+          </div>
         </div>
       </div>
     </div>
@@ -121,6 +130,7 @@ import { LANGUAGES, CODE_TEMPLATES, languageOf, NON_TERMINAL_STATUS } from '@/ut
 import { formatMemory } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import CodeEditor from '@/components/CodeEditor.vue'
+import CopyButton from '@/components/CopyButton.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 import DifficultyTag from '@/components/DifficultyTag.vue'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'

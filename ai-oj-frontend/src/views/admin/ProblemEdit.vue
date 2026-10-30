@@ -221,11 +221,17 @@
           </div>
           <div class="case-grid">
             <div class="case-cell">
-              <div class="case-label">输入</div>
+              <div class="case-label oj-copy-slot">
+                <span>输入</span>
+                <CopyButton :text="tc.inputData" />
+              </div>
               <el-input v-model="tc.inputData" type="textarea" :rows="4" placeholder="标准输入内容" class="mono" />
             </div>
             <div class="case-cell">
-              <div class="case-label">期望输出</div>
+              <div class="case-label oj-copy-slot">
+                <span>期望输出</span>
+                <CopyButton :text="tc.outputData" />
+              </div>
               <el-input v-model="tc.outputData" type="textarea" :rows="4" placeholder="期望输出内容" class="mono" />
             </div>
           </div>
@@ -367,11 +373,17 @@
           </div>
           <div class="ai-case-io">
             <div class="ai-case-cell">
-              <span class="ai-case-tag">输入</span>
+              <div class="ai-case-tag oj-copy-slot">
+                <span>输入</span>
+                <CopyButton :text="c.inputData" />
+              </div>
               <pre class="ai-case-pre">{{ c.inputData }}</pre>
             </div>
             <div class="ai-case-cell">
-              <span class="ai-case-tag">输出</span>
+              <div class="ai-case-tag oj-copy-slot">
+                <span>输出</span>
+                <CopyButton :text="c.outputData" />
+              </div>
               <pre class="ai-case-pre">{{ c.outputData }}</pre>
             </div>
           </div>
@@ -380,7 +392,10 @@
 
       <div v-if="aiDraft && aiDraft.referenceCode" class="ai-extra">
         <el-divider content-position="left">参考代码（C++）</el-divider>
-        <pre class="ai-code-pre">{{ aiDraft.referenceCode }}</pre>
+        <div class="oj-copyable">
+          <pre class="ai-code-pre">{{ aiDraft.referenceCode }}</pre>
+          <CopyButton :text="aiDraft.referenceCode" />
+        </div>
       </div>
 
       <div v-if="aiDraft && aiDraft.solution" class="ai-extra">
@@ -404,6 +419,7 @@ import { generateProblem } from '@/api/modules/ai'
 import { validateCases } from '@/api/modules/judge'
 import { CODE_TEMPLATES, DIFFICULTY, LANGUAGES, difficultyOf, languageOf } from '@/utils/oj'
 import CodeEditor from '@/components/CodeEditor.vue'
+import CopyButton from '@/components/CopyButton.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
 
 const route = useRoute()

@@ -25,7 +25,10 @@
           <el-descriptions-item label="判题时间">{{ formatTime(detail.judgeTime) }}</el-descriptions-item>
         </el-descriptions>
 
-        <pre v-if="detail.errorMessage" class="compile-msg">{{ detail.errorMessage }}</pre>
+        <div v-if="detail.errorMessage" class="oj-copyable">
+          <pre class="compile-msg">{{ detail.errorMessage }}</pre>
+          <CopyButton :text="detail.errorMessage" title="复制错误信息" />
+        </div>
 
         <template v-if="detail.cases?.length">
           <h4 class="section-title">用例结果</h4>
@@ -47,7 +50,10 @@
           </el-table>
         </template>
 
-        <h4 class="section-title">提交代码</h4>
+        <div class="oj-copy-slot">
+          <h4 class="section-title">提交代码</h4>
+          <CopyButton :text="detail.code" />
+        </div>
         <pre class="code-block">{{ detail.code }}</pre>
       </template>
     </div>
@@ -60,6 +66,7 @@ import { getSubmission } from '@/api/modules/judge'
 import { languageOf } from '@/utils/oj'
 import { formatTime, formatMemory } from '@/utils/format'
 import JudgeStatusTag from './JudgeStatusTag.vue'
+import CopyButton from './CopyButton.vue'
 
 const props = defineProps({
   /** 抽屉显隐（v-model） */
