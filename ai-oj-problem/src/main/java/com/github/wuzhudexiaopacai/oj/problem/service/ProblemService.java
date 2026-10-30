@@ -47,6 +47,14 @@ public interface ProblemService {
     ProblemSaveDTO adminDetail(Long id);
 
     /**
+     * 生成下一个可用展示题号（前缀 + 4 位起数字递增，取该前缀下最大题号 +1）
+     *
+     * @param prefix 题号字母前缀（如 A，默认 A）
+     * @return 建议题号，如 A1042
+     */
+    String nextProblemKey(String prefix);
+
+    /**
      * 题目详情（防穿透/防击穿/随机 TTL）
      *
      * @param problemKey 展示题号

@@ -64,6 +64,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -96,6 +97,16 @@ public class ProblemServiceImpl implements ProblemService {
      * 详情缓存随机 TTL 上限（秒，防雪崩）
      */
     private static final int TTL_RANDOM_BOUND = 300;
+
+    /**
+     * 题号字母前缀格式
+     */
+    private static final Pattern KEY_PREFIX_PATTERN = Pattern.compile("[A-Za-z]{1,4}");
+
+    /**
+     * 题号数字部分起始值（4 位起，对齐 A1001 惯例）
+     */
+    private static final long KEY_NUM_BASE = 1000L;
 
     private final ProblemMapper problemMapper;
     private final ProblemTagMapper problemTagMapper;
@@ -305,6 +316,22 @@ public class ProblemServiceImpl implements ProblemService {
         dto.setTitle(problem.getTitle());
         dto.setDifficulty(problem.getDifficulty());
         return dto;
+    }
+
+    @Override
+    public String nextProblemKey(String prefix) {
+        String p = StrUtil.isBlank(prefix) ? "A" : prefix.toUpperCase();
+        Asserts.isTrue(KEY_PREFIX_PATTERN.matcher(p).matches(), "题号前缀需为 1-4 位字母");
+        String maxKey = problemMapper.selectMaxKeyByPrefix(p);
+        long next = KEY_NUM_BASE + 1;
+        if (maxKey != null) {
+            String tail = maxKey.substring(p.length());
+            // 存量题号可能是非标准格式（无数字后缀等），解析失败则从起始值开始
+            if (tail.chars().allMatch(Character::isDigit) && !tail.isEmpty()) {
+                next = Long.parseLong(tail) + 1;
+            }
+        }
+        return p + String.format("%04d", next);
     }
 
     @Override

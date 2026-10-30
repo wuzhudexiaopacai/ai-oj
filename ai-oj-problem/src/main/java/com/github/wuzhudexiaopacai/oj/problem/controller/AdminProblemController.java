@@ -62,6 +62,15 @@ public class AdminProblemController {
         return Result.ok(problemService.adminDetail(id));
     }
 
+    @Operation(summary = "生成下一个可用题号", description = "按字母前缀（默认 A）查询该前缀下最大题号并递增 1，返回建议题号（如 A1042），供新建题目表单自动填充；题号唯一性仍以数据库唯一索引与新增时的校验为准。需 problem:create 或 problem:update 权限。")
+    @GetMapping("/next-key")
+    @PreAuthorize("hasAnyAuthority('problem:create','problem:update')")
+    public Result<String> nextKey(
+            @RequestParam(value = "prefix", required = false, defaultValue = "A")
+            @Parameter(description = "题号字母前缀（1-4 位字母，默认 A）", example = "A") String prefix) {
+        return Result.ok(problemService.nextProblemKey(prefix));
+    }
+
     @Operation(summary = "新增题目（题目+用例+语言模板一体保存）", description = "新增题目，题号 problemKey 必须全局唯一，重复时提示「题号已存在」。题目、标签、评测用例、语言模板一体保存；status/auth 未传时默认上架（1）与公开（1）。写入后发送 MQ 同步 ES 并删除详情缓存，返回新题目 ID。需 problem:create 权限。")
     @PostMapping
     @PreAuthorize("hasAuthority('problem:create')")
