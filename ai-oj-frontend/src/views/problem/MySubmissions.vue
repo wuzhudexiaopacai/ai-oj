@@ -1,7 +1,13 @@
 <template>
   <div v-loading="loading">
-    <SubmissionFilter size="small" @search="onFilterSearch" />
-    <el-table :data="list" size="small">
+    <SubmissionFilter size="small" :show-keyword="false" @search="onFilterSearch" />
+    <el-table
+      :data="list"
+      size="small"
+      class="sub-table"
+      row-class-name="clickable-row"
+      @row-click="openDetail"
+    >
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
           <JudgeStatusTag :status="row.status" />
@@ -25,6 +31,11 @@
           <span class="oj-muted">{{ formatTime(row.createTime) }}</span>
         </template>
       </el-table-column>
+      <el-table-column label="操作" width="70" align="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
+        </template>
+      </el-table-column>
       <template #empty>
         <el-empty description="暂无提交记录" :image-size="60" />
       </template>
@@ -40,6 +51,9 @@
         @current-change="load()"
       />
     </div>
+
+    <!-- 点击表格行：加载该次提交的代码与评测详情 -->
+    <SubmissionDetailDrawer v-model="detailVisible" :submit-id="currentSubmitId" />
   </div>
 </template>
 
@@ -51,6 +65,7 @@ import { formatMemory, formatTime } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
 import SubmissionFilter from '@/components/SubmissionFilter.vue'
+import SubmissionDetailDrawer from '@/components/SubmissionDetailDrawer.vue'
 
 const props = defineProps({
   problemId: { type: [Number, String], default: null }
@@ -64,6 +79,19 @@ const pageNum = ref(1)
 const pageSize = 10
 /** 筛选条件（状态 / 语言 / 时间范围 / 关键字），由 SubmissionFilter 组件回传 */
 const filters = ref({})
+
+/* 提交详情抽屉：点击行加载该次提交的代码与评测详情 */
+const detailVisible = ref(false)
+const currentSubmitId = ref('')
+
+function openDetail(row) {
+  const id = row?.submitId || row?.id
+  if (!id) {
+    return
+  }
+  currentSubmitId.value = id
+  detailVisible.value = true
+}
 
 async function load() {
   // 未登录不请求：该接口按登录用户过滤，匿名访问会触发 401 跳转登录

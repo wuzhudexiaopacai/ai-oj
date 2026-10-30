@@ -14,6 +14,7 @@
           v-loading="loading"
           :data="list"
           size="small"
+          class="sub-table"
           row-class-name="clickable-row"
           @row-click="openDetail"
         >
@@ -82,71 +83,25 @@
     </div>
 
     <!-- 提交详情抽屉：展示判题结果、编译错误、用例明细与源代码 -->
-    <el-drawer v-model="detailVisible" title="提交详情" size="640px">
-      <div v-loading="detailLoading" class="detail-body">
-        <template v-if="detail">
-          <el-descriptions :column="2" border size="small">
-            <el-descriptions-item label="提交 ID">
-              <span class="mono">{{ detail.submitId }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="状态">
-              <JudgeStatusTag :status="detail.status" />
-            </el-descriptions-item>
-            <el-descriptions-item label="语言">{{ languageOf(detail.language).label }}</el-descriptions-item>
-            <el-descriptions-item label="得分">{{ detail.score ?? '-' }}</el-descriptions-item>
-            <el-descriptions-item label="耗时">
-              {{ detail.timeUsed != null ? detail.timeUsed + ' ms' : '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="内存">{{ formatMemory(detail.memoryUsed) }}</el-descriptions-item>
-            <el-descriptions-item label="提交时间">{{ formatTime(detail.createTime) }}</el-descriptions-item>
-            <el-descriptions-item label="判题时间">{{ formatTime(detail.judgeTime) }}</el-descriptions-item>
-          </el-descriptions>
-
-          <pre v-if="detail.errorMessage" class="compile-msg">{{ detail.errorMessage }}</pre>
-
-          <template v-if="detail.cases?.length">
-            <h4 class="section-title">用例结果</h4>
-            <el-table :data="detail.cases" size="small">
-              <el-table-column label="#" prop="seq" width="50" align="center" />
-              <el-table-column label="结果" width="110">
-                <template #default="{ row }">
-                  <JudgeStatusTag :status="row.status" />
-                </template>
-              </el-table-column>
-              <el-table-column label="耗时" width="90" align="center">
-                <template #default="{ row }">
-                  {{ row.timeUsed != null ? row.timeUsed + ' ms' : '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column label="内存" width="100" align="center">
-                <template #default="{ row }">{{ formatMemory(row.memoryUsed) }}</template>
-              </el-table-column>
-            </el-table>
-          </template>
-
-          <h4 class="section-title">提交代码</h4>
-          <pre class="code-block">{{ detail.code }}</pre>
-        </template>
-      </div>
-    </el-drawer>
+    <SubmissionDetailDrawer v-model="detailVisible" :submit-id="currentSubmitId" />
   </div>
 </template>
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { pageSubmissions, getSubmission } from '@/api/modules/judge'
+import { pageSubmissions } from '@/api/modules/judge'
 import { languageOf } from '@/utils/oj'
 import { formatTime, formatMemory } from '@/utils/format'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
 import SubmissionFilter from '@/components/SubmissionFilter.vue'
+import SubmissionDetailDrawer from '@/components/SubmissionDetailDrawer.vue'
 
 const loading = ref(false)
 const list = ref([])
 const total = ref(0)
 
 const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detail = ref(null)
+const currentSubmitId = ref('')
 
 const query = reactive({
   pageNum: 1,
@@ -156,19 +111,14 @@ const query = reactive({
 /** 筛选条件（状态 / 语言 / 时间范围 / 关键字），由 SubmissionFilter 组件回传 */
 const filters = ref({})
 
-/** 打开提交详情（按 submitId 查询，含用例明细与编译错误） */
-async function openDetail(row) {
-  if (!row?.submitId) {
+/** 打开提交详情抽屉（详情拉取由抽屉组件内部完成） */
+function openDetail(row) {
+  const id = row?.submitId
+  if (!id) {
     return
   }
+  currentSubmitId.value = id
   detailVisible.value = true
-  detailLoading.value = true
-  detail.value = null
-  try {
-    detail.value = await getSubmission(row.submitId)
-  } finally {
-    detailLoading.value = false
-  }
 }
 
 async function load(resetPage) {
@@ -237,44 +187,5 @@ onMounted(() => load())
 
 .page-size {
   width: 110px;
-}
-
-.clickable-row {
-  cursor: pointer;
-}
-
-.detail-body {
-  min-height: 200px;
-}
-
-.section-title {
-  margin: 20px 0 10px;
-  font-size: 15px;
-}
-
-.compile-msg {
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 6px;
-  background: var(--oj-bg-page);
-  border-left: 3px solid var(--oj-danger);
-  color: var(--oj-danger);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.code-block {
-  margin-top: 8px;
-  padding: 12px 14px;
-  border-radius: 6px;
-  background: var(--oj-bg-page);
-  border: 1px solid var(--oj-border);
-  font-family: Consolas, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  max-height: 420px;
-  overflow: auto;
-  white-space: pre;
 }
 </style>

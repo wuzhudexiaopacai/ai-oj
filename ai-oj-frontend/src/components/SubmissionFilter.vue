@@ -31,6 +31,7 @@
       @change="emitSearch"
     />
     <el-input
+      v-if="showKeyword"
       v-model="form.keyword"
       :size="size"
       placeholder="题目 / 提交ID"
@@ -49,7 +50,9 @@ import { Search } from '@element-plus/icons-vue'
 import { JUDGE_STATUS, LANGUAGES } from '@/utils/oj'
 
 defineProps({
-  size: { type: String, default: 'default' }
+  size: { type: String, default: 'default' },
+  /** 是否显示「题目 / 提交ID」关键字框：题目详情页已按 problemId 过滤，可关闭以让筛选收进一行 */
+  showKeyword: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['search'])
@@ -82,12 +85,19 @@ function emitSearch() {
   margin-bottom: 12px;
 }
 
+/* 下拉框 / 搜索框 / 日期 / 按钮统一圆角，靠 size 属性对齐高度 */
+.submission-filter :deep(.el-select__wrapper),
+.submission-filter :deep(.el-input__wrapper),
+.submission-filter :deep(.el-date-editor.el-input__wrapper) {
+  border-radius: var(--oj-radius);
+}
+
 .status {
-  width: 110px;
+  width: 120px;
 }
 
 .lang {
-  width: 110px;
+  width: 120px;
 }
 
 .range {

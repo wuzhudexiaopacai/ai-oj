@@ -313,6 +313,28 @@ a {
   color: var(--oj-text-secondary);
 }
 
+/* 提交记录表：表头背景加深、行 hover 平滑高亮（200ms），与双主题令牌统一 */
+.sub-table.el-table th.el-table__cell {
+  background-color: var(--oj-bg-fill-dark);
+  color: var(--oj-text-regular);
+}
+
+html[data-theme='dark'] .sub-table.el-table th.el-table__cell {
+  background-color: var(--oj-bg-fill);
+}
+
+.sub-table.el-table .el-table__row {
+  transition: background-color 0.2s var(--oj-ease);
+}
+
+.sub-table.el-table .el-table__body tr.clickable-row {
+  cursor: pointer;
+}
+
+.sub-table.el-table .el-table__body tr:hover > td.el-table__cell {
+  background-color: var(--oj-primary-softer);
+}
+
 /* 按钮：字重与圆角统一，主按钮不加渐变不浮夸；
    hover 仅做平滑过渡 + 极轻微放大（≤1.03），圆形/文字按钮不参与缩放 */
 .el-button {
@@ -349,9 +371,18 @@ a {
 }
 
 @keyframes oj-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  /* 结束帧必须回到 transform: none，而非 translateY(0)。
+     否则 .oj-reveal 会因 forwards 长期保留 transform 而成为 fixed 定位的
+     containing block，导致其内部未 append-to-body 的 el-dialog / el-drawer
+     遮罩层定位错乱、弹窗内容被截断错位。 */
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -430,9 +461,39 @@ body.is-assistant-dragging * {
   font-weight: 500;
 }
 
+/* 页码按钮：统一圆角 + 边框 + hover 高亮平滑过渡 */
+.el-pagination.is-background .el-pager li,
+.el-pagination.is-background .btn-prev,
+.el-pagination.is-background .btn-next {
+  border-radius: var(--oj-radius);
+  border: 1px solid var(--oj-border);
+  background-color: var(--oj-bg-raised);
+  color: var(--oj-text-regular);
+  min-width: 32px;
+  transition:
+    background-color 0.2s var(--oj-ease),
+    border-color 0.2s var(--oj-ease),
+    color 0.2s var(--oj-ease);
+}
+
+.el-pagination.is-background .el-pager li:hover:not(.is-active),
+.el-pagination.is-background .btn-prev:hover:not(:disabled),
+.el-pagination.is-background .btn-next:hover:not(:disabled) {
+  background-color: var(--oj-primary-soft);
+  border-color: var(--oj-primary);
+  color: var(--oj-primary);
+}
+
 .el-pagination.is-background .el-pager li.is-active {
   background-color: var(--oj-primary) !important;
+  border-color: var(--oj-primary) !important;
   color: #fff !important;
+  font-weight: 600;
+}
+
+.el-pagination .el-pagination__total,
+.el-pagination .el-pagination__jump {
+  color: var(--oj-text-secondary);
 }
 
 /* Tabs */
