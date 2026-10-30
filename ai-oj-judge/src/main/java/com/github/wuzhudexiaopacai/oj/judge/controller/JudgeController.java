@@ -1,10 +1,12 @@
 package com.github.wuzhudexiaopacai.oj.judge.controller;
 
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
+import com.github.wuzhudexiaopacai.oj.judge.dto.CaseValidateRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
 import com.github.wuzhudexiaopacai.oj.judge.service.JudgeService;
 import com.github.wuzhudexiaopacai.oj.judge.service.SubmissionService;
+import com.github.wuzhudexiaopacai.oj.judge.vo.CaseValidateVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.JudgeProgressVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.JudgeRunVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.SubmitResultVO;
@@ -52,6 +54,15 @@ public class JudgeController {
     @PostMapping("/run")
     public Result<JudgeRunVO> run(@Valid @RequestBody JudgeRunRequest req) {
         return Result.ok(judgeService.run(req));
+    }
+
+    /**
+     * 用例校验（AI 出题用参考代码实跑校验测试用例）
+     */
+    @Operation(summary = "用例校验", description = "需登录；用于 AI 出题后用参考代码逐组实跑校验测试用例。不入库、不产生提交记录，选用一台在线沙箱对每组用例调用 /run 跑参考代码得到真实输出，按“忽略行尾空白与末尾空行”与期望输出比对，逐组返回真实输出与是否通过；编译失败时置 compileOk=false 并短路。每用户每分钟限 10 次。")
+    @PostMapping("/validate-cases")
+    public Result<CaseValidateVO> validateCases(@Valid @RequestBody CaseValidateRequest req) {
+        return Result.ok(judgeService.validateCases(req));
     }
 
     /**

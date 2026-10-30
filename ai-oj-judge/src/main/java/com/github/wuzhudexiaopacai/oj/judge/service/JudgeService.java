@@ -12,6 +12,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.core.result.ResultCode;
 import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
+import com.github.wuzhudexiaopacai.oj.judge.dto.CaseValidateRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
@@ -23,6 +24,7 @@ import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunResponse;
+import com.github.wuzhudexiaopacai.oj.judge.vo.CaseValidateVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.JudgeRunVO;
 import com.github.wuzhudexiaopacai.oj.judge.vo.SubmitResultVO;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +38,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -230,5 +233,103 @@ public class JudgeService {
             case "OUTPUT_LIMIT_EXCEEDED", "OLE" -> JudgeStatusEnum.OUTPUT_LIMIT_EXCEEDED;
             default -> JudgeStatusEnum.SYSTEM_ERROR;
         };
+    }
+
+    /**
+     * 用例校验（AI 出题后用参考代码逐组实跑，以真实输出校正测试用例期望）
+     * <p>
+     * 不入库、不产生提交记录；选用一台在线沙箱，对每组用例调用 /run 跑参考代码得到真实输出，
+     * 按“忽略行尾空白与末尾空行”规则与期望输出比对，回填每组真实输出供前端采用。
+     * 编译失败时置 compileOk=false 并短路返回。
+     *
+     * @param req 校验请求
+     * @return 逐组校验结果
+     */
+    public CaseValidateVO validateCases(CaseValidateRequest req) {
+        Long userId = SecurityUtils.requireLogin().getId();
+
+        String rateKey = "judge:validate:rate:" + userId;
+        var rateLimiter = redissonClient.getRateLimiter(rateKey);
+        // 校验为多组串行重操作，限流每用户每分钟 10 次
+        rateLimiter.trySetRate(org.redisson.api.RateType.OVERALL, 10, 1, org.redisson.api.RateIntervalUnit.MINUTES);
+        Asserts.isTrue(rateLimiter.tryAcquire(), "校验过于频繁，请稍后再试");
+
+        JudgeSandbox sandbox = selectAvailableSandbox();
+        Asserts.notNull(sandbox, ResultCode.SANDBOX_UNAVAILABLE.getMessage());
+
+        int timeLimit = req.getTimeLimitMs() == null || req.getTimeLimitMs() <= 0
+                ? 10000 : req.getTimeLimitMs();
+
+        CaseValidateVO vo = new CaseValidateVO();
+        vo.setCompileOk(true);
+        vo.setCases(new ArrayList<>());
+        int passed = 0;
+
+        sandboxLoadStrategy.occupy(sandbox.getSandboxKey());
+        try {
+            for (CaseValidateRequest.CaseItem item : req.getCases()) {
+                CaseValidateVO.ItemResult r = new CaseValidateVO.ItemResult();
+                r.setSeq(item.getSeq());
+                r.setExpectedOutput(item.getExpectedOutput());
+                try {
+                    SandboxRunResponse resp = sandboxClient.run(sandbox.getBaseUrl(),
+                            new SandboxRunRequest(req.getLanguage(), req.getCode(), item.getInput(), timeLimit));
+                    JudgeStatusEnum status = mapStatus(resp.status());
+                    r.setStatus(status.name());
+                    r.setActualOutput(resp.output());
+                    r.setErrorMessage(resp.errorMessage());
+                    r.setTimeMs(resp.timeMs());
+                    r.setMemoryKb(resp.memoryKb());
+                    if (status == JudgeStatusEnum.COMPILE_ERROR) {
+                        vo.setCompileOk(false);
+                        vo.setCompileLog(resp.errorMessage());
+                        r.setPassed(false);
+                        vo.getCases().add(r);
+                        break;
+                    }
+                    boolean ok = normalizeOutput(resp.output())
+                            .equals(normalizeOutput(item.getExpectedOutput()));
+                    r.setPassed(ok);
+                    if (ok) {
+                        passed++;
+                    }
+                } catch (Exception e) {
+                    log.error("用例校验沙箱调用失败 seq={} sandbox={}", item.getSeq(), sandbox.getSandboxKey(), e);
+                    sandboxLoadStrategy.blacklist(sandbox.getSandboxKey());
+                    throw new BizException(ResultCode.SANDBOX_UNAVAILABLE);
+                }
+                vo.getCases().add(r);
+            }
+        } finally {
+            sandboxLoadStrategy.release(sandbox.getSandboxKey());
+        }
+
+        vo.setTotalCount(req.getCases().size());
+        vo.setPassedCount(passed);
+        vo.setOverallPassed(Boolean.TRUE.equals(vo.getCompileOk()) && passed == vo.getTotalCount());
+        return vo;
+    }
+
+    /**
+     * 输出归一化：统一换行符、去除每行行尾空白与整体末尾空行，与标准答案比对规则一致
+     */
+    private static String normalizeOutput(String s) {
+        if (s == null) {
+            return "";
+        }
+        String t = s.replace("\r\n", "\n").replace("\r", "\n");
+        String[] lines = t.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) {
+                sb.append('\n');
+            }
+            sb.append(lines[i].stripTrailing());
+        }
+        int end = sb.length();
+        while (end > 0 && sb.charAt(end - 1) == '\n') {
+            end--;
+        }
+        return sb.substring(0, end);
     }
 }
