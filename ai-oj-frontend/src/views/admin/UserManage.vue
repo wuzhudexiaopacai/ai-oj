@@ -85,7 +85,7 @@
     </el-card>
 
     <!-- 新建/编辑用户 -->
-    <el-dialog v-model="editVisible" :title="editForm.id ? '编辑用户' : '新建用户'" width="520px" destroy-on-close>
+    <el-dialog v-model="editVisible" :title="editForm.id ? '编辑用户' : '新建用户'" width="520px" append-to-body destroy-on-close>
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="90px">
         <el-form-item label="用户名" prop="username">
           <el-input v-model="editForm.username" :disabled="!!editForm.id" placeholder="4-32 位登录名" />

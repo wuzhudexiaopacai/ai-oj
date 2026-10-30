@@ -138,7 +138,7 @@
     </el-tabs>
 
     <!-- 角色编辑弹窗 -->
-    <el-dialog v-model="editVisible" :title="editForm.id ? '编辑角色' : '新建角色'" width="480px" destroy-on-close>
+    <el-dialog v-model="editVisible" :title="editForm.id ? '编辑角色' : '新建角色'" width="480px" append-to-body destroy-on-close>
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="90px">
         <el-form-item label="角色编码" prop="code">
           <el-input v-model="editForm.code" :disabled="!!editForm.id" placeholder="如 ROLE_TEACHER" />
@@ -163,7 +163,7 @@
     </el-dialog>
 
     <!-- 权限配置抽屉 -->
-    <el-drawer v-model="permVisible" :title="`权限配置 — ${currentRole?.name || ''}`" size="420px">
+    <el-drawer v-model="permVisible" :title="`权限配置 — ${currentRole?.name || ''}`" size="420px" append-to-body>
       <div class="perm-panel">
         <el-alert
           type="info"
@@ -194,7 +194,7 @@
     </el-drawer>
 
     <!-- 权限节点编辑弹窗 -->
-    <el-dialog v-model="permEditVisible" :title="permForm.id ? '编辑权限节点' : '新增权限节点'" width="520px" destroy-on-close>
+    <el-dialog v-model="permEditVisible" :title="permForm.id ? '编辑权限节点' : '新增权限节点'" width="520px" append-to-body destroy-on-close>
       <el-form ref="permFormRef" :model="permForm" :rules="permRules" label-width="90px">
         <el-form-item label="父节点">
           <el-tree-select

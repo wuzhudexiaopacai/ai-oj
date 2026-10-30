@@ -53,7 +53,7 @@
     </div>
 
     <!-- 创建比赛快捷弹窗（简化版，完整管理在比赛管理页） -->
-    <el-dialog v-model="createContestVisible" title="快速创建比赛" width="520px">
+    <el-dialog v-model="createContestVisible" title="快速创建比赛" width="520px" append-to-body>
       <el-form :model="contestForm" label-width="80px">
         <el-form-item label="标题" required>
           <el-input v-model="contestForm.title" maxlength="128" placeholder="比赛标题" />

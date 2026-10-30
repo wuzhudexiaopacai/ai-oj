@@ -80,7 +80,8 @@
     <el-dialog
       v-model="editVisible"
       :title="editForm.id ? '编辑比赛' : '创建比赛'"
-      width="640px"
+      width="760px"
+      append-to-body
       destroy-on-close
     >
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="96px">
@@ -146,7 +147,13 @@
     </el-dialog>
 
     <!-- 题目绑定抽屉 -->
-    <el-drawer v-model="problemVisible" :title="`比赛题目 — ${currentContest?.title || ''}`" size="560px">
+    <el-drawer
+      v-model="problemVisible"
+      :title="`比赛题目 — ${currentContest?.title || ''}`"
+      size="680px"
+      append-to-body
+      @opened="relayoutProblemTable"
+    >
       <div class="bind-panel">
         <div class="bind-form">
           <el-select
@@ -185,7 +192,7 @@
           title="赛中题号按添加顺序自动生成 A / B / C…"
           class="bind-tip"
         />
-        <el-table :data="pagedContestProblems" v-loading="problemsLoading">
+        <el-table ref="problemTableRef" :data="pagedContestProblems" v-loading="problemsLoading">
           <el-table-column label="题号" prop="displayId" width="70" align="center">
             <template #default="{ row }">
               <el-tag effect="dark" size="small">{{ row.displayId }}</el-tag>
@@ -365,6 +372,11 @@ const problemOptions = ref([])
 const problemSearching = ref(false)
 const binding = ref(false)
 const bindForm = reactive({ problem: null, title: '', score: 100 })
+/** 抽屉内表格引用：滑入动画结束后重算列宽，修复表头/内容错位截断 */
+const problemTableRef = ref(null)
+function relayoutProblemTable() {
+  problemTableRef.value?.doLayout()
+}
 
 async function openProblems(row) {
   currentContest.value = row
@@ -461,6 +473,7 @@ onMounted(() => load())
 
 .bind-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
