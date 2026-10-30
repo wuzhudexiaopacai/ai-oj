@@ -22,12 +22,12 @@
                   <h3 class="sample-title">示例</h3>
                   <div v-for="(s, i) in problem.samples" :key="i" class="sample">
                     <div class="sample-block">
-                      <div class="sample-label oj-muted">输入</div>
-                      <pre>{{ s.input }}</pre>
+                      <div class="sample-label">输入</div>
+                      <pre class="code-block">{{ s.input }}</pre>
                     </div>
                     <div class="sample-block">
-                      <div class="sample-label oj-muted">输出</div>
-                      <pre>{{ s.output }}</pre>
+                      <div class="sample-label">输出</div>
+                      <pre class="code-block">{{ s.output }}</pre>
                     </div>
                   </div>
                 </template>
@@ -52,12 +52,13 @@
             <el-select v-model="language" style="width: 150px" @change="onLanguageChange">
               <el-option v-for="l in LANGUAGES" :key="l.value" :label="l.label" :value="l.value" />
             </el-select>
-            <el-button text size="small" @click="resetCode">重置代码</el-button>
+            <el-button class="btn-ghost" text size="small" @click="resetCode">重置代码</el-button>
           </div>
           <CodeEditor v-model="code" :language="monacoLanguage" :height="editorHeight" />
           <div class="editor-actions">
-            <el-button :icon="MagicStick" @click="assistant.show()">AI 助手</el-button>
+            <el-button class="btn-ai" text :icon="MagicStick" @click="assistant.show()">AI 助手</el-button>
             <el-button
+              class="btn-submit"
               type="primary"
               :loading="submitting"
               :disabled="!problem"
@@ -332,7 +333,26 @@ watch(
 
 .limits {
   margin: 8px 0 4px;
-  font-size: 13px;
+  font-size: 12.5px;
+  color: var(--oj-text-secondary);
+}
+
+/* Tab 选中态文字高亮 + hover 平滑背景过渡 */
+.desc :deep(.el-tabs__item) {
+  height: 34px;
+  line-height: 34px;
+  padding: 0 14px;
+  border-radius: var(--oj-radius);
+  transition: color var(--oj-duration-fast) var(--oj-ease-out),
+    background-color var(--oj-duration-fast) var(--oj-ease-out);
+}
+.desc :deep(.el-tabs__item:hover) {
+  color: var(--oj-primary);
+  background: var(--oj-bg-fill);
+}
+.desc :deep(.el-tabs__item.is-active) {
+  color: var(--oj-primary);
+  font-weight: 600;
 }
 
 .sample-title {
@@ -353,15 +373,22 @@ watch(
 
 .sample-label {
   font-size: 12px;
-  margin-bottom: 4px;
+  font-weight: 500;
+  color: var(--oj-text-secondary);
+  margin-bottom: 5px;
 }
 
-.sample-block pre {
+/* 示例：只读代码块，等宽字体，仅用于展示 */
+.code-block {
   margin: 0;
   padding: 10px 12px;
   background: var(--oj-code-bg);
   border: 1px solid var(--oj-border);
-  border-radius: 6px;
+  border-radius: var(--oj-radius);
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--oj-text-regular);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -380,12 +407,54 @@ watch(
 .editor-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 10px;
   margin-top: 10px;
 }
 
+/* 重置代码：视觉弱化 */
+.btn-ghost {
+  color: var(--oj-text-secondary);
+  transition: color var(--oj-duration-fast) var(--oj-ease-out);
+}
+.btn-ghost:hover {
+  color: var(--oj-text-regular);
+}
+
+/* AI 助手：权重低于提交（文字按钮 + 次级色） */
+.btn-ai {
+  color: var(--oj-text-regular);
+  transition: color var(--oj-duration-fast) var(--oj-ease-out);
+}
+.btn-ai:hover {
+  color: var(--oj-primary);
+}
+
+/* 提交：主按钮，hover 柔和过渡 */
+.editor-actions :deep(.btn-submit) {
+  transition: background-color var(--oj-duration-fast) var(--oj-ease-out),
+    box-shadow var(--oj-duration-fast) var(--oj-ease-out),
+    transform var(--oj-duration-fast) var(--oj-ease-out);
+}
+.editor-actions :deep(.btn-submit:hover) {
+  box-shadow: var(--oj-shadow-hover);
+}
+
 .result-card {
   padding: 14px 16px;
+  animation: result-in var(--oj-duration) var(--oj-ease-out) both;
+}
+
+/* 评测面板平滑向下展开入场 */
+@keyframes result-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .result-header {
@@ -431,6 +500,17 @@ watch(
 
 .wrong-case-list {
   margin-top: 4px;
+  border-top: none;
+}
+
+/* 错误用例条目 hover 背景反馈 */
+.wrong-case-list :deep(.el-collapse-item__header) {
+  padding: 0 10px;
+  border-radius: var(--oj-radius);
+  transition: background-color var(--oj-duration-fast) var(--oj-ease-out);
+}
+.wrong-case-list :deep(.el-collapse-item__header:hover) {
+  background: var(--oj-bg-fill);
 }
 
 .wrong-case-seq {
