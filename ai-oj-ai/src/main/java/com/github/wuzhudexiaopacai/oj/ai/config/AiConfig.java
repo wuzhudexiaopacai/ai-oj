@@ -23,7 +23,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @Slf4j
 @Configuration
-@EnableConfigurationProperties({AiProperties.class, AiModelProperties.class})
+@EnableConfigurationProperties({AiProperties.class, AiModelProperties.class, AiGenerateProperties.class})
 public class AiConfig {
 
     /**

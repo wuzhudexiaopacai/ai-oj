@@ -1,10 +1,13 @@
 package com.github.wuzhudexiaopacai.oj.ai.controller;
 
 import com.github.wuzhudexiaopacai.oj.ai.dto.ChatStreamRequest;
+import com.github.wuzhudexiaopacai.oj.ai.dto.ProblemGenerateDTO;
 import com.github.wuzhudexiaopacai.oj.ai.dto.ReviewRequestDTO;
 import com.github.wuzhudexiaopacai.oj.ai.dto.TaskSubmitDTO;
 import com.github.wuzhudexiaopacai.oj.ai.service.AiChatService;
+import com.github.wuzhudexiaopacai.oj.ai.service.AiGenerateService;
 import com.github.wuzhudexiaopacai.oj.ai.service.AiTaskService;
+import com.github.wuzhudexiaopacai.oj.ai.vo.ProblemDraftVO;
 import com.github.wuzhudexiaopacai.oj.ai.vo.TaskStatusVO;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,6 +39,16 @@ public class AiChatController {
     private final AiChatService aiChatService;
 
     private final AiTaskService aiTaskService;
+
+    private final AiGenerateService aiGenerateService;
+
+    @Operation(summary = "AI 出题（同步生成结构化题目草稿）",
+            description = "根据知识点 topic、难度 difficulty（0/1/2）、可选自定义要求 requirement 与用例数 caseCount（默认 10），"
+                    + "同步调用大模型生成一道含题面、输入输出说明与多组评测用例的结构化题目草稿，返回 JSON 供前端一键回填编辑表单；需登录。")
+    @PostMapping("/generate")
+    public Result<ProblemDraftVO> generate(@Validated @RequestBody ProblemGenerateDTO req) {
+        return Result.ok(aiGenerateService.generate(req));
+    }
 
     @Operation(summary = "流式对话（SSE）",
             description = "以 text/event-stream 返回，每个 SSE 事件的 data 为一个模型输出片段（Markdown 文本）。服务端按会话场景（chat/hint/review/generate）渲染提示词，注入题目上下文与本次上报的代码；每用户默认限流 10 次/分钟，超时 180 秒。流结束后把本轮问答写入 Redis 会话记忆并异步落库 ai_message；需登录且会话须归当前用户所有。")

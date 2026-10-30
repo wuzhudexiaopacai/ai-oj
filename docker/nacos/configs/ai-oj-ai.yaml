@@ -31,3 +31,10 @@ ai-oj:
     rate-limit-per-minute: 10
     # 会话记忆最大轮数（超出截断）
     max-memory-rounds: 20
+  generate:
+    # AI 出题专用参数：大 JSON（题面+用例+参考代码+题解）输出量大，
+    # 全局 max-tokens(2048) 会截断导致 JsonEOFException，故单独放宽；
+    # qwen-plus 稳定版最大输出仅 8192，出题长 JSON 仍可能超限，改用 qwen-plus-latest(16384)
+    model: qwen-plus-latest
+    max-tokens: 16384
+    temperature: 0.7
