@@ -5,7 +5,7 @@
 
 **JDK 21 · Spring Cloud Alibaba · Vue 3 · Rust 评测沙箱**
 
-一套完整的微服务在线判题系统：题库、多语言评测、比赛排行、AI 辅助解题，全部开箱即用。
+一套完整的微服务在线判题系统：题库、多语言评测、比赛排行、AI 辅助解题与智能出题，全部开箱即用。
 
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.13-6DB33F?logo=springboot)](https://spring.io/projects/spring-boot)
@@ -68,15 +68,16 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 ### 用户端
 
 - **题库**：题号/标题关键字、难度、标签多选筛选，Elasticsearch 全文检索（不可用时自动降级为数据库 LIKE）
-- **做题**：Monaco 编辑器、语言模板、样例与自测、运行结果逐用例展示、错误用例下载
-- **提交**：WebSocket 实时判题进度，断线自动降级为轮询；提交记录展示耗时与内存占用
+- **做题**：Monaco 编辑器、语言模板、样例与自测、运行结果逐用例展示、错误用例下载；题面支持 KaTeX 数学公式与代码高亮，样例/用例/提交代码一键复制
+- **提交**：WebSocket 实时判题进度，断线自动降级为轮询；提交记录表格支持点击行展开详情抽屉（源代码 + 逐用例判题结果 + 耗时内存）
 - **比赛**：ACM / OI 两种赛制、公开 / 私有 / 密码赛、赛内倒计时、封榜、实时排行榜（图表 + 排名双视图，标记「我」）
-- **个人中心**：资料编辑、头像上传、我的提交、我的比赛
-- **AI 助手**：题目讲解、代码评审、提示词模板、流式输出，支持多场景会话
+- **个人中心**：资料编辑、头像上传、我的提交、我的比赛，自动统计提交总数与通过题数
+- **AI 助手**：题目页可停靠悬浮球（拖拽移动、靠边收纳不遮挡题面），题目讲解、代码评审、提示词模板、流式输出，支持多场景会话
 
 ### 管理端 `/admin`
 
 - 题目管理：增删改查、测试用例（含大数据文件）、语言模板、Excel 导入导出
+- **AI 智能出题**：按知识点 + 难度生成结构化题目草稿（题面、用例、参考代码、题解），一键回填编辑表单；参考代码沙箱实跑校验用例期望输出；新建题目自动填充下一个可用题号
 - 比赛管理：创建/编辑/删除、绑定赛题、封榜设置
 - 用户 / 角色 / 权限：RBAC，22 条权限码与后端 `@PreAuthorize` 一一对应
 - 数据总览
@@ -124,7 +125,7 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 | ai-oj-judge | 9003 | 9003 | 提交受理、判题状态机、沙箱调度、进度推送、比赛成绩消费 |
 | ai-oj-contest | 9004 | 9004 | 比赛、赛题、报名、实时排行榜、状态扫描 |
 | ai-oj-file | 9005 | 9005 | 分片上传/秒传/续传、MinIO、预签名、延时清理、头像 |
-| ai-oj-ai | 9006 | 9006 | AI 流式对话、代码评审、异步任务、提示词模板 |
+| ai-oj-ai | 9006 | 9006 | AI 流式对话、代码评审、AI 出题、异步任务、提示词模板 |
 | ai-oj-sandbox | 8000 | 8000 | Rust 评测沙箱（axum + bollard） |
 | ai-oj-frontend | 80 | 80 | Vue 3 前端（nginx） |
 
@@ -147,9 +148,9 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 | 消息与任务 | RocketMQ 5.3.2（starter 2.3.3）、Quartz JDBC 集群模式、Seata 2.3.0（AT） |
 | 统一日志 | Filebeat 8.19.21 → Elasticsearch（数据流 `ai-oj-logs`）+ Kibana 8.19.21 |
 | 状态机 | Spring StateMachine 4.0.0 |
-| AI 能力 | Spring AI 1.0.0 + Spring AI Alibaba 1.0.0.4（DashScope 原生协议 / qwen-plus）、SseEmitter 流式输出、Nacos 配置热更新 |
+| AI 能力 | Spring AI 1.0.0 + Spring AI Alibaba 1.0.0.4（DashScope 原生协议 / qwen-plus，出题用 qwen-plus-latest）、SseEmitter 流式输出、Nacos 配置热更新 |
 | 评测沙箱 | Rust（axum + bollard 0.17 + tokio），Docker sibling container |
-| 前端 | Vue 3.5.13、Vite 5.4.11、Element Plus 2.9.3、Pinia 2.3.0、Vue Router 4.5.0、axios 1.7.9、Monaco Editor 0.52.2、markdown-it 14.1.0、ECharts 5.5.1 |
+| 前端 | Vue 3.5.13、Vite 5.4.11、Element Plus 2.9.3、Pinia 2.3.0、Vue Router 4.5.0、axios 1.7.9、Monaco Editor 0.52.2、markdown-it 14.1.0、highlight.js 11.12、KaTeX 0.19 + markdown-it-texmath、ECharts 5.5.1、dayjs 1.11.13 |
 | 对象存储 | MinIO（`ai-oj` 私有桶 + `ai-oj-public` 公共桶） |
 | 部署 | Docker Compose、Nginx 1.27 |
 | 工具库 | jjwt 0.12.6、Hutool 5.8.32、Knife4j 4.5.0、EasyExcel 4.0.3、Lombok 1.18.34 |
@@ -246,7 +247,7 @@ docker compose restart ai-oj-gateway ai-oj-auth ai-oj-problem ai-oj-judge ai-oj-
 
 ## API 文档
 
-六个业务服务均已接入 **Knife4j（OpenAPI 3）**，覆盖全部 21 个 Controller、84 个接口；每个接口都有分组、摘要、详细说明，路径/查询参数均带类型、必填与示例，请求 DTO 与响应 VO/实体字段均有中文描述。
+六个业务服务均已接入 **Knife4j（OpenAPI 3）**，覆盖全部 21 个 Controller、78 个接口；每个接口都有分组、摘要、详细说明，路径/查询参数均带类型、必填与示例，请求 DTO 与响应 VO/实体字段均有中文描述。
 
 | 服务 | 文档地址 |
 |---|---|
@@ -269,10 +270,11 @@ docker compose restart ai-oj-gateway ai-oj-auth ai-oj-problem ai-oj-judge ai-oj-
 | 用户 | `GET /user/info`、`PUT /user/profile`、`PUT /user/password` |
 | 管理后台 | `/admin/user/**`、`/admin/role/**`、`/admin/permission/**`、`/admin/problem/**`、`PUT /admin/contest/{id}`、`DELETE /admin/contest/{id}` |
 | 题目 | `GET /problem/page`、`GET /problem/tags`、`GET /problem/{problemKey}`、`GET /problem/search`、`/solution/**` |
-| 判题 | `POST /judge/submit`、`POST /judge/run`、`GET /judge/progress`、`GET /submission/page`、`GET /submission/submit/{submitId}`、`GET /submission/{id}` |
+| 判题 | `POST /judge/submit`、`POST /judge/run`、`POST /judge/validate-cases`、`GET /judge/progress`、`GET /submission/page`、`GET /submission/submit/{submitId}`、`GET /submission/{id}` |
 | 比赛 | `GET /contest/page`、`GET /contest/mine`、`GET /contest/{id}`、`POST /contest/{id}/register`、`DELETE /contest/{id}/register`、`GET /contest/{id}/rank` |
 | 文件 | `POST /file/upload/init`、`POST /file/upload/chunk`、`POST /file/upload/merge`、`POST /file/avatar`、`GET /file/{id}/url`、`GET /file/page` |
-| AI | `POST /ai/session`、`GET /ai/session/page`、`GET /ai/session/{id}/messages`、`DELETE /ai/session/{id}`、`POST /ai/chat/stream`、`POST /ai/review`、`POST /ai/task/submit`、`GET /ai/task/{taskId}` |
+| AI | `POST /ai/generate`、`POST /ai/session`、`GET /ai/session/page`、`GET /ai/session/{id}/messages`、`DELETE /ai/session/{id}`、`POST /ai/chat/stream`、`POST /ai/review`、`POST /ai/task/submit`、`GET /ai/task/{taskId}` |
+| 后台题目 | `GET /admin/problem/next-key`（自动生成下一个可用题号）及其余 `/admin/**` 管理接口 |
 
 ---
 
@@ -346,7 +348,7 @@ npm run dev        # http://localhost:5173
 本地直连注意事项：
 
 - Nacos 配置中的 `mysql`、`redis`、`rocketmq-namesrv`、`minio`、`seata-server`、`sentinel-dashboard` 均为**容器名**。IDE 在宿主机运行时需在 Nacos 控制台把 `ai-oj-common.yaml` 与各服务配置中的 host 改为 `localhost`，或用本地 `application-local.yml` 覆盖数据源/Redis 配置。
-- `vite.config.js` 的 `/api`、`/ws` 代理目标为 `http://localhost:8080`。若本地启动网关可直接使用；若只连 compose 暴露的网关，需改为 `http://localhost:8088`。
+- `vite.config.js` 的 `/api`、`/ws` 代理目标默认 `http://localhost:8088`（compose 暴露的网关宿主端口）；若在本地 IDE 直接启动网关（默认 8080），需同步改代理目标。
 - `/files` 代理直连 MinIO `http://localhost:9000/ai-oj-public`。
 
 ### 常用运维命令
@@ -386,15 +388,16 @@ ai-oj
 ├── ai-oj-judge          # 提交受理/状态机/沙箱调度/WebSocket/Quartz 补偿
 ├── ai-oj-contest        # 比赛/报名(Seata)/状态扫描/排行榜策略
 ├── ai-oj-file           # 分片上传/秒传/续传/预签名/延时清理
-├── ai-oj-ai             # AI 会话/流式对话/场景策略/异步任务
+├── ai-oj-ai             # AI 会话/流式对话/场景策略/异步任务/AI 出题
 ├── ai-oj-common         # common-core / common-web 自动装配
 ├── ai-oj-api            # Feign 契约 + 共享 DTO
 ├── ai-oj-sandbox        # Rust 评测沙箱（languages.toml / config.toml）
 ├── ai-oj-frontend       # Vue3 前端
 │   ├── src/views        # Home、problem、contest、submission、user、auth、admin
+│   ├── src/components   # AI 助手悬浮球、Markdown 渲染（高亮+KaTeX）、提交详情抽屉、复制角标等
 │   ├── src/layout       # AppLayout（前台）/ AdminLayout（后台）
 │   ├── src/api          # request 封装 + 各业务模块
-│   └── src/stores       # user / theme（明暗主题）
+│   └── src/stores       # user / theme（明暗主题）/ assistant（悬浮球状态）
 ├── docker               # compose 依赖：nacos 配置、mysql init SQL、seata、rocketmq、minio、filebeat
 ├── docker-compose.yml
 └── pom.xml              # 聚合 POM，统一依赖版本
@@ -414,7 +417,7 @@ ai-oj
 
 | 数据库 | 核心表 |
 |---|---|
-| `ai_oj_auth` | `sys_user`、`sys_role`、`sys_permission`、`sys_user_role`、`sys_role_permission`、`sys_login_log` |
+| `ai_oj_auth` | `sys_user`（含 `submit_count` / `accept_count` 统计字段，由判题结果消息异步累加）、`sys_role`、`sys_permission`、`sys_user_role`、`sys_role_permission`、`sys_login_log` |
 | `ai_oj_problem` | `pms_problem`（`problem_key` 展示题号唯一）、`pms_test_case`、`pms_problem_language`、`pms_tag`、`pms_tag_category`、`pms_problem_tag`、`pms_solution` |
 | `ai_oj_judge` | `judge_submission`（`uk_submit_id` 唯一键做幂等兜底）、`judge_case_result`、`judge_sandbox`、`contest_record`、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
 | `ai_oj_contest` | `contest`、`contest_problem`、`contest_registration`（`contest_id + user_id` 唯一）、`undo_log` |
@@ -474,6 +477,28 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 - 前端使用 `fetch + ReadableStream` 而非 `EventSource`，因为需要携带 `Authorization` 头；使用 **POST** 是因为代码可能数千行，放 URL 会超长
 - 其他 AI 接口：`POST /api/ai/review`（同步代码评审）、`POST /api/ai/task/submit`、`GET /api/ai/task/{taskId}`（异步任务，走 `AI_OJ_AI_TASK`）
 - `ChatModel` 由 `@Bean @RefreshScope` 构建，Nacos 中修改 DashScope 模型/参数后自动重建，无需重启；`DASHSCOPE_API_KEY` 通过宿主机 `.env` 注入，Nacos 配置只引用 `${DASHSCOPE_API_KEY}`
+- 前端 nginx 对 `/api` 的 `proxy_read_timeout / proxy_send_timeout` 为 310s，覆盖 SSE 长流与用例校验等长耗时接口
+
+### AI 出题链路（生成 → 实跑校验 → 回填落库闭环）
+
+```text
+题目编辑页输入：知识点 topic + 难度 difficulty + 用例数 caseCount
+  │  POST /api/ai/generate（同步）
+  ▼
+AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
+  │  与全局对话参数分离，避免大 JSON 被全局 max-tokens 截断）
+  ▼
+结构化题目草稿 ProblemDraftVO：题面 + 输入输出说明 + 多组用例 + 参考代码 + 题解
+  ▼
+前端一键回填编辑表单 → POST /api/judge/validate-cases
+  │  选一台在线沙箱，用参考代码逐组实跑得到真实输出，
+  │  按「忽略行尾空白与末尾空行」比对并逐组回显通过/不通过（不入库，限流 10 次/分钟）
+  ▼
+校验通过后随题目一体保存（题号由 GET /api/admin/problem/next-key 自动填充）
+```
+
+- 参考代码不进 SPJ：仅用于实跑校正期望输出，不作为判题特判程序
+- 前端使用独立超时配置（用例校验 10 组顺序跑，超时放宽至 90s）
 
 ### 比赛链路
 
@@ -559,7 +584,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 | Topic | 用途 |
 |---|---|
 | `AI_OJ_JUDGE_SUBMIT` | 提交 → 判题执行 |
-| `AI_OJ_JUDGE_RESULT` | 判题结果广播 → 比赛成绩 |
+| `AI_OJ_JUDGE_RESULT` | 判题结果广播 → 比赛成绩 + 用户统计（auth 侧累加 `submit_count` / `accept_count`，Redis `setIfAbsent` 按 submitId 幂等） |
 | `AI_OJ_PROBLEM_SYNC` | 题目变更同步 ES |
 | `AI_OJ_LOGIN_LOG` | 登录日志异步落库 |
 | `AI_OJ_FILE_CLEAN` | 分片临时文件延时清理 |
@@ -600,6 +625,9 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 | 白名单接口拿不到用户 | 比赛报名提示未登录 | 白名单路径带 token 时仍需解析身份，`AuthGlobalFilter` 已处理 |
 | 提交报 `submitId` 不能为空 | `@NotBlank` 校验失败 | 前端需先用 `crypto.randomUUID()` 生成 `submitId` 再提交 |
 | AI 请求 404 | `base-url` 出现双斜杠 | Nacos 中 `base-url` 末尾不能带 `/` |
+| AI 出题解析失败 | 日志报 `JsonEOFException` | 出题大 JSON（题面+用例+参考代码+题解）被全局 `max-tokens: 2048` 截断；出题走独立参数 `ai-oj.generate`（qwen-plus-latest + 16384），与对话参数分离 |
+| 管理页弹窗/下拉被裁切错位 | 弹层陷在表单容器内或位置偏移 | 祖先元素的 `transform` 动画会破坏 Element Plus 弹层的 fixed 定位；弹层统一 `append-to-body` |
+| 自测/用例校验返回系统错误 | 沙箱 `/run` 响应字段接不到 | Rust 沙箱与 Java DTO 契约字段名不一致；已统一为 `stdin` / `stdout` / `stderr` |
 | 镜像拉取报 magic number mismatch | Docker Desktop 启动异常 | 关闭 Docker Desktop 的 containerd 镜像存储（Settings → General） |
 | 宿主机跑服务连不上 RocketMQ | 能连 NameServer 但发不出消息 | Broker 以容器名 `rocketmq-broker` 注册；宿主机加 hosts 映射或改 `brokerIP1` |
 | Sentinel 控制台没有数据 | Dashboard 一片空白 | 项目未引入 Sentinel 客户端，Dashboard 仅为预留；限流由 Redisson 实现 |
@@ -612,6 +640,7 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 - [ ] 单元测试与集成测试补齐（Judge 状态机、沙箱结果聚合、缓存三防）
 - [ ] 接入 GitHub Actions：Maven 编译、前端构建、Rust `cargo clippy`
 - [ ] 判题沙箱支持更多语言（Rust 模板、C#、Kotlin）
+- [ ] AI 出题支持多轮改写与批量生成（结合异步任务 `AI_OJ_AI_TASK`）
 - [ ] 题目导入模板与批量导入的版本兼容校验
 - [ ] 生产化部署：Nacos MySQL 存储 + 鉴权、外部化密钥、健康检查与限流接入 Sentinel
 - [ ] 可选的 Prometheus + Grafana 指标面板
