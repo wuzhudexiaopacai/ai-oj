@@ -1,7 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import cn.hutool.core.util.StrUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.JudgeCaseDTO;
@@ -18,11 +17,11 @@ import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeCaseResult;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
-import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSandboxMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mq.JudgeSubmitMessage;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
+import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeRequest;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeResponse;
 import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeEvent;
@@ -72,7 +71,7 @@ public class JudgeExecuteService {
 
     private final JudgeCaseResultMapper judgeCaseResultMapper;
 
-    private final JudgeSandboxMapper judgeSandboxMapper;
+    private final SandboxRegistry sandboxRegistry;
 
     private final JudgeStateMachineService stateMachineService;
 
@@ -201,8 +200,7 @@ public class JudgeExecuteService {
      * 选择沙箱并调用，失败拉黑换机重试，最多 JUDGE_MAX_RETRY 次
      */
     private SandboxJudgeResponse invokeSandboxWithRetry(JudgeSubmission submission, ProblemJudgeDTO problem) {
-        List<JudgeSandbox> sandboxes = judgeSandboxMapper.selectList(
-                new LambdaQueryWrapper<JudgeSandbox>().eq(JudgeSandbox::getStatus, 1));
+        List<JudgeSandbox> sandboxes = sandboxRegistry.listAvailable();
         if (sandboxes == null || sandboxes.isEmpty()) {
             throw new BizException("无可用评测沙箱");
         }

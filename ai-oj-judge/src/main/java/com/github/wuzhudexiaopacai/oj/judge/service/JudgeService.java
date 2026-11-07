@@ -17,11 +17,11 @@ import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
-import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSandboxMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mq.JudgeSubmitMessage;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
+import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunResponse;
 import com.github.wuzhudexiaopacai.oj.judge.vo.CaseValidateVO;
@@ -55,7 +55,7 @@ public class JudgeService {
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
-    private final JudgeSandboxMapper judgeSandboxMapper;
+    private final SandboxRegistry sandboxRegistry;
 
     private final RocketMQTemplate rocketMQTemplate;
 
@@ -209,9 +209,7 @@ public class JudgeService {
      * 选择一台在线沙箱（自测运行用，单次不重试）
      */
     private JudgeSandbox selectAvailableSandbox() {
-        List<JudgeSandbox> sandboxes = judgeSandboxMapper.selectList(
-                new LambdaQueryWrapper<JudgeSandbox>().eq(JudgeSandbox::getStatus, 1));
-        return sandboxLoadStrategy.select(sandboxes);
+        return sandboxLoadStrategy.select(sandboxRegistry.listAvailable());
     }
 
     /**

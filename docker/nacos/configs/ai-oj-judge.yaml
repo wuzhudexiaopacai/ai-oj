@@ -47,3 +47,9 @@ ai-oj:
     stuck-scan-cron: "0 * * * * ?"
     # 判题超时阈值（秒），超过视为沙箱异常
     judge-timeout-seconds: 120
+    # 沙箱心跳：定时探测 /health 刷新 last_heartbeat
+    sandbox:
+      # 健康探测间隔（毫秒）
+      heartbeat-interval-ms: 30000
+      # 心跳有效期（秒），超过未刷新则不再参与调度
+      stale-seconds: 90
