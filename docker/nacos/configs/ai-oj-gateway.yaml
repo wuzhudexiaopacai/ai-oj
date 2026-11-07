@@ -53,6 +53,12 @@ spring:
             - Path=/api/ai/**
           filters:
             - StripPrefix=1
+        - id: ai-oj-log
+          uri: lb://ai-oj-log
+          predicates:
+            - Path=/api/admin/log/**
+          filters:
+            - StripPrefix=1
         # 比赛时间实时推送 WebSocket（按比赛维度，需排在通用 /ws/** 之前）
         - id: ai-oj-contest-ws
           uri: lb:ws://ai-oj-contest

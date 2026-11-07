@@ -2,6 +2,7 @@ package com.github.wuzhudexiaopacai.oj.common.web.config;
 
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import com.github.wuzhudexiaopacai.oj.common.web.aspect.IdempotentAspect;
+import com.github.wuzhudexiaopacai.oj.common.web.aspect.OperationLogAspect;
 import com.github.wuzhudexiaopacai.oj.common.web.feign.FeignRelayConfig;
 import com.github.wuzhudexiaopacai.oj.common.web.handler.GlobalExceptionHandler;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -19,7 +20,8 @@ import java.math.BigInteger;
  */
 @AutoConfiguration
 @Import({MybatisPlusConfig.class, RedisConfig.class, RedissonConfig.class, JwtConfig.class,
-        DefaultSecurityConfig.class, IdempotentAspect.class, GlobalExceptionHandler.class, FeignRelayConfig.class})
+        DefaultSecurityConfig.class, IdempotentAspect.class, OperationLogAspect.class,
+        GlobalExceptionHandler.class, FeignRelayConfig.class})
 public class CommonWebAutoConfiguration {
 
     /**

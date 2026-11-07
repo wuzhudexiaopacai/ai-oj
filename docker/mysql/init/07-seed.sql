@@ -48,7 +48,9 @@ INSERT INTO sys_permission (id, parent_id, code, name, type, sort) VALUES
 -- 文件管理
 (400, 0, 'file:manage',      '文件管理',   3, 51),
 -- AI 管理
-(500, 0, 'ai:template',      'AI模板管理', 3, 61);
+(500, 0, 'ai:template',      'AI模板管理', 3, 61),
+-- 日志管理
+(600, 0, 'log:operation:list', '操作日志查询', 3, 71);
 
 -- 管理员拥有全部权限
 INSERT INTO sys_role_permission (id, role_id, permission_id)

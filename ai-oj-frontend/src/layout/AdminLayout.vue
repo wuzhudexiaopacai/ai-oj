@@ -34,6 +34,10 @@
           <el-icon><Key /></el-icon>
           <template #title>角色权限</template>
         </el-menu-item>
+        <el-menu-item index="/admin/log">
+          <el-icon><Document /></el-icon>
+          <template #title>操作日志</template>
+        </el-menu-item>
       </el-menu>
 
       <div class="aside-footer" @click="collapsed = !collapsed">
@@ -106,7 +110,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
   Odometer, Collection, Trophy, User, Key, Sunny, Moon,
-  ArrowDown, SwitchButton, HomeFilled, Expand, Fold
+  ArrowDown, SwitchButton, HomeFilled, Expand, Fold, Document
 } from '@element-plus/icons-vue'
 import { useThemeStore } from '@/stores/theme'
 import { useUserStore } from '@/stores/user'
@@ -126,6 +130,7 @@ const activeMenu = computed(() => {
   if (path.startsWith('/admin/contest')) return '/admin/contest'
   if (path.startsWith('/admin/user')) return '/admin/user'
   if (path.startsWith('/admin/role')) return '/admin/role'
+  if (path.startsWith('/admin/log')) return '/admin/log'
   return '/admin/dashboard'
 })
 

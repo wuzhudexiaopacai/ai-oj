@@ -1,0 +1,19 @@
+# AI-OJ 统一日志服务
+# @author wuzhudexiaopacai
+server:
+  port: 9007
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://mysql:3306/ai_oj_log?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 3
+
+oj:
+  log:
+    # 日志保留天数，由定时任务清理
+    retention-days: 90

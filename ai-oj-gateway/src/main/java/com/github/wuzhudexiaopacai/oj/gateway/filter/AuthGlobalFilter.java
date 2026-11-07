@@ -27,6 +27,7 @@ import reactor.core.publisher.Mono;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 全局认证过滤器
@@ -58,9 +59,18 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getPath().value();
 
+        // 链路 ID：透传上游或新生成，供下游运行日志与操作日志串联
+        String traceHeader = request.getHeaders().getFirst(CommonConstants.HEADER_TRACE_ID);
+        String traceId = StringUtils.hasText(traceHeader)
+                ? traceHeader
+                : UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+
         // 无论是否白名单，外部请求一律剥离内部调用头，防止伪造内网身份
         ServerHttpRequest sanitized = request.mutate()
-                .headers(headers -> headers.remove(CommonConstants.HEADER_INTERNAL_CALL))
+                .headers(headers -> {
+                    headers.remove(CommonConstants.HEADER_INTERNAL_CALL);
+                    headers.set(CommonConstants.HEADER_TRACE_ID, traceId);
+                })
                 .build();
 
         // 白名单路径：无 token 直接放行为匿名；带 token 时仍解析身份，

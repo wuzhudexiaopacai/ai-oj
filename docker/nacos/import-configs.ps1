@@ -18,7 +18,8 @@ $DataIds = @(
     "ai-oj-judge.yaml",
     "ai-oj-contest.yaml",
     "ai-oj-file.yaml",
-    "ai-oj-ai.yaml"
+    "ai-oj-ai.yaml",
+    "ai-oj-log.yaml"
 )
 
 foreach ($dataId in $DataIds) {

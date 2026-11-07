@@ -1,6 +1,8 @@
 package com.github.wuzhudexiaopacai.oj.problem.controller;
 
+import com.github.wuzhudexiaopacai.oj.common.core.enums.OpType;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
+import com.github.wuzhudexiaopacai.oj.common.web.annotation.OperationLog;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.problem.dto.ProblemPageQueryDTO;
 import com.github.wuzhudexiaopacai.oj.problem.dto.ProblemSaveDTO;
@@ -72,6 +74,7 @@ public class AdminProblemController {
     }
 
     @Operation(summary = "新增题目（题目+用例+语言模板一体保存）", description = "新增题目，题号 problemKey 必须全局唯一，重复时提示「题号已存在」。题目、标签、评测用例、语言模板一体保存；status/auth 未传时默认上架（1）与公开（1）。写入后发送 MQ 同步 ES 并删除详情缓存，返回新题目 ID。需 problem:create 权限。")
+    @OperationLog(module = "题目管理", operation = "新增题目", type = OpType.CREATE)
     @PostMapping
     @PreAuthorize("hasAuthority('problem:create')")
     public Result<Long> create(@Valid @RequestBody ProblemSaveDTO saveDTO) {
@@ -79,6 +82,7 @@ public class AdminProblemController {
     }
 
     @Operation(summary = "更新题目", description = "按题目 ID 更新题目，题目必须存在且题号不能与其他题目重复。标签、用例、语言模板为整体替换（先物理删除再重建），对应子列表不传时保留原数据。更新后发送 MQ 同步 ES 并删除详情缓存。需 problem:update 权限。")
+    @OperationLog(module = "题目管理", operation = "更新题目", type = OpType.UPDATE)
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('problem:update')")
     public Result<Void> update(
@@ -90,6 +94,7 @@ public class AdminProblemController {
     }
 
     @Operation(summary = "删除题目", description = "按题目 ID 逻辑删除题目，题目不存在时报错。删除后发送 MQ 删除 ES 文档并清理详情缓存。需 problem:delete 权限。")
+    @OperationLog(module = "题目管理", operation = "删除题目", type = OpType.DELETE)
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('problem:delete')")
     public Result<Void> delete(

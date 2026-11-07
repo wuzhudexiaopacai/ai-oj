@@ -386,6 +386,25 @@ services:
       - ai-oj-net
     restart: unless-stopped
 
+  ai-oj-log:
+    build:
+      context: .
+      dockerfile: docker/runtime.Dockerfile
+      args:
+        MODULE: ai-oj-log
+    container_name: ai-oj-log
+    depends_on:
+      - nacos
+      - mysql
+      - redis
+      - rocketmq-broker
+    environment: *app-env
+    ports:
+      - "9007:9007"
+    networks:
+      - ai-oj-net
+    restart: unless-stopped
+
   # ======================== 前端 ========================
   ai-oj-frontend:
     build: ./ai-oj-frontend

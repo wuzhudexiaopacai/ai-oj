@@ -48,7 +48,8 @@ const routes = [
       { path: 'problem/:id/edit', name: 'admin-problem-edit', component: () => import('@/views/admin/ProblemEdit.vue'), meta: { title: '编辑题目', requiresAdmin: true } },
       { path: 'contest', name: 'admin-contest', component: () => import('@/views/admin/ContestManage.vue'), meta: { title: '比赛管理', requiresAdmin: true } },
       { path: 'user', name: 'admin-user', component: () => import('@/views/admin/UserManage.vue'), meta: { title: '用户管理', requiresAdmin: true } },
-      { path: 'role', name: 'admin-role', component: () => import('@/views/admin/RoleManage.vue'), meta: { title: '角色权限', requiresAdmin: true } }
+      { path: 'role', name: 'admin-role', component: () => import('@/views/admin/RoleManage.vue'), meta: { title: '角色权限', requiresAdmin: true } },
+      { path: 'log', name: 'admin-log', component: () => import('@/views/admin/OperationLog.vue'), meta: { title: '操作日志', requiresAdmin: true } }
     ]
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFound.vue'), meta: { title: '页面不存在' } }

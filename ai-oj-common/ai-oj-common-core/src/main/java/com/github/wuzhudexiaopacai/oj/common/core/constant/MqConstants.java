@@ -35,6 +35,11 @@ public class MqConstants {
     public static final String LOGIN_LOG_TOPIC = "AI_OJ_LOGIN_LOG";
 
     /**
+     * 操作日志 Topic（业务写操作异步落库，统一由 ai-oj-log 服务消费）
+     */
+    public static final String OPERATION_LOG_TOPIC = "AI_OJ_OPERATION_LOG";
+
+    /**
      * 文件清理 Topic（分片临时块延迟清理，利用 RocketMQ 延时消息）
      */
     public static final String FILE_CLEAN_TOPIC = "AI_OJ_FILE_CLEAN";
@@ -78,6 +83,11 @@ public class MqConstants {
      * 登录日志消费组
      */
     public static final String GROUP_LOGIN_LOG = "ai-oj-login-log-consumer";
+
+    /**
+     * 操作日志消费组
+     */
+    public static final String GROUP_OPERATION_LOG = "ai-oj-operation-log-consumer";
 
     /**
      * 文件清理消费组

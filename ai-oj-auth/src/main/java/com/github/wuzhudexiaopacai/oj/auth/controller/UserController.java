@@ -4,7 +4,9 @@ import com.github.wuzhudexiaopacai.oj.auth.dto.PasswordUpdateRequest;
 import com.github.wuzhudexiaopacai.oj.auth.dto.ProfileUpdateRequest;
 import com.github.wuzhudexiaopacai.oj.auth.service.UserService;
 import com.github.wuzhudexiaopacai.oj.auth.vo.UserInfoVO;
+import com.github.wuzhudexiaopacai.oj.common.core.enums.OpType;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
+import com.github.wuzhudexiaopacai.oj.common.web.annotation.OperationLog;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +51,7 @@ public class UserController {
      */
     @Operation(summary = "修改个人资料",
             description = "仅修改当前登录用户的昵称、邮箱、头像与个人简介，邮箱不可与其他用户重复；未传的头像/简介会置为空字符串。修改成功后立即清除该用户信息缓存。需要登录。")
+    @OperationLog(module = "个人中心", operation = "修改个人资料", type = OpType.UPDATE)
     @PutMapping("/profile")
     public Result<Void> updateProfile(@Validated @RequestBody ProfileUpdateRequest request) {
         userService.updateProfile(request);
@@ -63,6 +66,7 @@ public class UserController {
      */
     @Operation(summary = "修改密码",
             description = "校验原密码正确后更新为新密码（6-32 位），并清除用户信息缓存。已签发的令牌在到期前仍然有效，如需强制下线需另行调用登出接口。需要登录。")
+    @OperationLog(module = "个人中心", operation = "修改密码", type = OpType.UPDATE, recordResult = false)
     @PutMapping("/password")
     public Result<Void> updatePassword(@Validated @RequestBody PasswordUpdateRequest request) {
         userService.updatePassword(request);

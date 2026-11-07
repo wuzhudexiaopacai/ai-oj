@@ -32,6 +32,11 @@ public class CommonConstants {
     public static final String HEADER_INTERNAL_CALL = "X-Internal-Call";
 
     /**
+     * 链路追踪 ID 请求头（网关生成，业务服务透传，日志表与运行日志共用）
+     */
+    public static final String HEADER_TRACE_ID = "X-Trace-Id";
+
+    /**
      * Token 请求头
      */
     public static final String TOKEN_HEADER = "Authorization";

@@ -21,6 +21,7 @@
         <module>ai-oj-contest</module>
         <module>ai-oj-file</module>
         <module>ai-oj-ai</module>
+        <module>ai-oj-log</module>
     </modules>
 
     <properties>
