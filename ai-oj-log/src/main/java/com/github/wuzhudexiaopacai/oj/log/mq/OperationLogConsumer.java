@@ -37,6 +37,9 @@ public class OperationLogConsumer implements RocketMQListener<String> {
             OperationLogMessage source = objectMapper.readValue(message, OperationLogMessage.class);
             SysOperationLog entity = new SysOperationLog();
             BeanUtils.copyProperties(source, entity);
+            // 消费线程没有登录上下文，审计人直接用消息里的操作人，避免 create_by/update_by 恒为 NULL
+            entity.setCreateBy(source.getUserId());
+            entity.setUpdateBy(source.getUserId());
             operationLogMapper.insert(entity);
         } catch (Exception e) {
             // 消费失败不重试爆队列，记录到运行日志由 Kibana 检索

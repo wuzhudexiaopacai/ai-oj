@@ -42,6 +42,20 @@ public class BaseEntity implements Serializable {
     private LocalDateTime updateTime;
 
     /**
+     * 创建人（当前登录用户 ID，未登录/系统任务为空）
+     */
+    @TableField(fill = FieldFill.INSERT)
+    @Schema(description = "创建人用户 ID，系统任务或未登录时为空", example = "1")
+    private Long createBy;
+
+    /**
+     * 更新人（当前登录用户 ID，未登录/系统任务为空）
+     */
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    @Schema(description = "更新人用户 ID，系统任务或未登录时为空", example = "1")
+    private Long updateBy;
+
+    /**
      * 逻辑删除标记：0 正常 1 已删除
      */
     @TableLogic

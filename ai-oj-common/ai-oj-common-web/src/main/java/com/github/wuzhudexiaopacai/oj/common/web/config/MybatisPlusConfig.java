@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.BlockAttackInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,14 +48,20 @@ public class MybatisPlusConfig {
         return new MetaObjectHandler() {
             @Override
             public void insertFill(MetaObject metaObject) {
-                this.strictInsertFill(metaObject, "createTime", LocalDateTime.class, LocalDateTime.now());
-                this.strictInsertFill(metaObject, "updateTime", LocalDateTime.class, LocalDateTime.now());
+                LocalDateTime now = LocalDateTime.now();
+                this.strictInsertFill(metaObject, "createTime", LocalDateTime.class, now);
+                this.strictInsertFill(metaObject, "updateTime", LocalDateTime.class, now);
                 this.strictInsertFill(metaObject, "deleted", Integer.class, 0);
+                // 审计人：从当前登录上下文取用户 ID，系统任务/未登录场景下为 null（strictFill 会自动跳过）
+                Long userId = SecurityUtils.currentUserIdOrNull();
+                this.strictInsertFill(metaObject, "createBy", Long.class, userId);
+                this.strictInsertFill(metaObject, "updateBy", Long.class, userId);
             }
 
             @Override
             public void updateFill(MetaObject metaObject) {
                 this.strictUpdateFill(metaObject, "updateTime", LocalDateTime.class, LocalDateTime.now());
+                this.strictUpdateFill(metaObject, "updateBy", Long.class, SecurityUtils.currentUserIdOrNull());
             }
         };
     }
