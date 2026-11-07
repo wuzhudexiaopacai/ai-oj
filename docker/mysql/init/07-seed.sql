@@ -50,7 +50,10 @@ INSERT INTO sys_permission (id, parent_id, code, name, type, sort) VALUES
 -- AI 管理
 (500, 0, 'ai:template',      'AI模板管理', 3, 61),
 -- 日志管理
-(600, 0, 'log:operation:list', '操作日志查询', 3, 71);
+(600, 0, 'log:operation:list', '操作日志查询', 3, 71),
+-- 死信管理
+(601, 0, 'judge:deadletter:list',   '死信列表', 3, 81),
+(602, 0, 'judge:deadletter:handle', '死信处理', 3, 82);
 
 -- 管理员拥有全部权限
 INSERT INTO sys_role_permission (id, role_id, permission_id)
