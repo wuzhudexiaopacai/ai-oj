@@ -60,13 +60,13 @@ export async function streamChat({ sessionId, question, code, language, onToken,
       break
     }
     buffer += decoder.decode(value, { stream: true })
-    // SSE 帧以空行分隔，逐帧取出 data: 内容
+    // SSE 帧以空行分隔；按规范一帧可含多条 data: 行（token 中的换行会被拆行），需用 \n 拼回
     const frames = buffer.split('\n\n')
     buffer = frames.pop()
     for (const frame of frames) {
-      const line = frame.split('\n').find((item) => item.startsWith('data:'))
-      if (line) {
-        onToken(line.slice(5))
+      const lines = frame.split('\n').filter((item) => item.startsWith('data:'))
+      if (lines.length) {
+        onToken(lines.map((line) => line.slice(5)).join('\n'))
       }
     }
   }

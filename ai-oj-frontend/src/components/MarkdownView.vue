@@ -1,10 +1,10 @@
 <template>
   <!-- eslint-disable-next-line vue/no-v-html -->
-  <div class="markdown-body" v-html="html" @click="onClick"></div>
+  <div ref="rootRef" class="markdown-body" v-html="html" @click="onClick"></div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import katex from 'katex'
 import texmath from 'markdown-it-texmath'
@@ -81,6 +81,16 @@ md.use(texmath, {
 md.renderer.rules.fence = (tokens, idx) => {
   const token = tokens[idx]
   const lang = (token.info || '').trim().split(/\s+/)[0].toLowerCase()
+  // Mermaid 图：隐藏源码 + SVG 挂载点，渲染在 watch(html) 后异步进行
+  if (lang === 'mermaid') {
+    return (
+      `<div class="mermaid-block"><div class="code-block-head">` +
+      `<span class="code-lang">Mermaid</span>` +
+      `<button type="button" class="code-copy" title="复制源码">复制</button>` +
+      `</div><div class="mermaid-mount"></div>` +
+      `<pre class="mermaid-source"><code>${md.utils.escapeHtml(token.content)}</code></pre></div>`
+    )
+  }
   const label = LANG_LABELS[lang] || (lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : '代码')
   let body
   if (lang && hljs.getLanguage(lang)) {
@@ -97,6 +107,86 @@ md.renderer.rules.fence = (tokens, idx) => {
 }
 
 const html = computed(() => md.render(normalizeMath(props.content || '')))
+
+/* ---------- Mermaid 渲染：懒加载 + 流式容错 + 主题跟随 ---------- */
+const rootRef = ref(null)
+let mermaidApi = null
+let mermaidTheme = null
+let renderSeq = 0
+
+function currentThemeName() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default'
+}
+
+/** 动态 import mermaid（包体较大，仅在真的出现 mermaid 块时加载），主题变化时重新初始化 */
+async function getMermaid() {
+  const theme = currentThemeName()
+  if (!mermaidApi) {
+    mermaidApi = (await import('mermaid')).default
+  }
+  if (mermaidTheme !== theme) {
+    mermaidApi.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      suppressErrorRendering: true,
+      theme
+    })
+    mermaidTheme = theme
+  }
+  return mermaidApi
+}
+
+/**
+ * 把 .mermaid-block 的源码渲染成 SVG 注入 .mermaid-mount。
+ * 流式输出期间语法可能不完整：渲染失败时保留源码显示，成功后隐藏源码。
+ */
+async function renderMermaid() {
+  const root = rootRef.value
+  if (!root) return
+  const blocks = root.querySelectorAll('.mermaid-block')
+  if (!blocks.length) return
+  let mermaid
+  try {
+    mermaid = await getMermaid()
+  } catch {
+    return
+  }
+  const seq = ++renderSeq
+  for (const block of blocks) {
+    const source = block.querySelector('.mermaid-source code')?.textContent || ''
+    const mount = block.querySelector('.mermaid-mount')
+    if (!mount) continue
+    // 源码与主题都没变且已成功渲染过，跳过（流式期间避免每个 token 重渲染）
+    if (
+      block.classList.contains('is-rendered') &&
+      block.dataset.source === source &&
+      block.dataset.theme === mermaidTheme
+    ) {
+      continue
+    }
+    try {
+      const { svg } = await mermaid.render(`mmd-${seq}-${Math.random().toString(36).slice(2)}`, source)
+      mount.innerHTML = svg
+      block.classList.add('is-rendered')
+      block.dataset.source = source
+      block.dataset.theme = mermaidTheme
+    } catch {
+      mount.innerHTML = ''
+      block.classList.remove('is-rendered')
+    }
+  }
+}
+
+watch(html, () => nextTick(renderMermaid))
+
+let themeObserver = null
+onMounted(() => {
+  renderMermaid()
+  // 跟随站点明暗主题切换重渲染
+  themeObserver = new MutationObserver(() => renderMermaid())
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+})
+onBeforeUnmount(() => themeObserver?.disconnect())
 
 /**
  * 数学公式规范化：AI 常把多行块级结构（cases / matrix / aligned 等）塞进行内 $...$，
@@ -118,7 +208,7 @@ function normalizeMath(src) {
 async function onClick(e) {
   const btn = e.target.closest('.code-copy')
   if (!btn) return
-  const code = btn.closest('.code-block')?.querySelector('code')
+  const code = btn.closest('.code-block, .mermaid-block')?.querySelector('pre code')
   if (!code) return
   try {
     await copyText(code.textContent)

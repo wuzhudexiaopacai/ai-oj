@@ -703,6 +703,40 @@ html[data-theme='dark'] .el-card {
   color: var(--oj-success);
 }
 
+/* ---------- Mermaid 图：与代码块同款卡片，成功渲染后隐藏源码 ---------- */
+.markdown-body .mermaid-block {
+  margin: 0 0 14px;
+  border: 1px solid var(--oj-border);
+  border-radius: var(--oj-radius-lg);
+  overflow: hidden;
+  background: var(--oj-code-bg);
+}
+
+.markdown-body .mermaid-block .mermaid-mount {
+  padding: 14px 16px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.markdown-body .mermaid-block .mermaid-mount svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 渲染失败（常见于流式输出中途）时仅展示源码 */
+.markdown-body .mermaid-block.is-rendered .mermaid-source {
+  display: none;
+}
+
+.markdown-body .mermaid-block .mermaid-source {
+  margin: 0;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: auto;
+}
+
 /* ---------- 复制角标：贴内容块右上角，默认弱化、hover 提亮、成功变对勾 ---------- */
 .oj-copyable {
   position: relative;
