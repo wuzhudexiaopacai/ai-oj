@@ -16,6 +16,9 @@
             <JudgeStatusTag :status="detail.status" />
           </el-descriptions-item>
           <el-descriptions-item label="语言">{{ languageOf(detail.language).label }}</el-descriptions-item>
+          <el-descriptions-item label="代码长度">
+            {{ detail.codeLength != null ? detail.codeLength + ' 字符' : '-' }}
+          </el-descriptions-item>
           <el-descriptions-item label="得分">{{ detail.score ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="耗时">
             {{ detail.timeUsed != null ? detail.timeUsed + ' ms' : '-' }}
