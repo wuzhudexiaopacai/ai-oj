@@ -8,6 +8,7 @@ import com.github.wuzhudexiaopacai.oj.ai.entity.AiSession;
 import com.github.wuzhudexiaopacai.oj.ai.service.AiChatService;
 import com.github.wuzhudexiaopacai.oj.ai.service.AiSessionService;
 import com.github.wuzhudexiaopacai.oj.ai.strategy.AiSceneStrategyFactory;
+import com.github.wuzhudexiaopacai.oj.ai.util.TokenEstimator;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemJudgeDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
@@ -25,6 +26,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -103,19 +106,52 @@ public class AiChatServiceImpl implements AiChatService {
         emitter.onTimeout(emitter::complete);
         StringBuilder answer = new StringBuilder();
         AtomicReference<Disposable> subscriptionRef = new AtomicReference<>();
-        Disposable subscription = chatClient.prompt().messages(messages).stream().content()
+        // 模型（如 DashScope）会在流式末帧携带 usage，逐帧捕获最后一次有效值用于 token 统计
+        AtomicReference<Usage> usageRef = new AtomicReference<>();
+        Disposable subscription = chatClient.prompt().messages(messages).stream().chatResponse()
                 .subscribe(
-                        token -> {
-                            answer.append(token);
-                            sendToken(emitter, token, subscriptionRef);
+                        response -> {
+                            String token = extractText(response);
+                            if (token != null && !token.isEmpty()) {
+                                answer.append(token);
+                                sendToken(emitter, token, subscriptionRef);
+                            }
+                            Usage usage = extractUsage(response);
+                            if (usage != null) {
+                                usageRef.set(usage);
+                            }
                         },
                         error -> {
                             log.error("AI 流式对话失败: sessionId={}", sessionId, error);
                             emitter.completeWithError(error);
                         },
-                        () -> onComplete(emitter, sessionId, question, answer.toString()));
+                        () -> onComplete(emitter, sessionId, question, answer.toString(), prompt, usageRef.get()));
         subscriptionRef.set(subscription);
         return emitter;
+    }
+
+    /**
+     * 从流式帧中取出增量文本（usage-only 帧无文本）
+     */
+    private String extractText(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            return null;
+        }
+        return response.getResult().getOutput().getText();
+    }
+
+    /**
+     * 从流式帧中取出 usage，未携带或计数为空时返回 null
+     */
+    private Usage extractUsage(ChatResponse response) {
+        if (response == null || response.getMetadata() == null) {
+            return null;
+        }
+        Usage usage = response.getMetadata().getUsage();
+        if (usage == null || usage.getTotalTokens() == null || usage.getTotalTokens() <= 0) {
+            return null;
+        }
+        return usage;
     }
 
     @Override
@@ -147,17 +183,33 @@ public class AiChatServiceImpl implements AiChatService {
 
     /**
      * 流式完成：写入会话记忆并异步落库
+     *
+     * <p>token 统计优先取模型返回的 usage（prompt/completion），
+     * 流式响应未携带 usage 时按字符数估算，保证 ai_message.tokens 有实际意义。</p>
      */
-    private void onComplete(SseEmitter emitter, Long sessionId, String question, String answer) {
+    private void onComplete(SseEmitter emitter, Long sessionId, String question, String answer,
+                            String prompt, Usage usage) {
         try {
             appendMemory(sessionId, question, answer);
-            sessionService.saveMessageAsync(sessionId, AiConstants.ROLE_USER, question);
-            sessionService.saveMessageAsync(sessionId, AiConstants.ROLE_ASSISTANT, answer);
+            int questionTokens = resolveTokens(usage == null ? null : usage.getPromptTokens(), prompt);
+            int answerTokens = resolveTokens(usage == null ? null : usage.getCompletionTokens(), answer);
+            sessionService.saveMessageAsync(sessionId, AiConstants.ROLE_USER, question, questionTokens);
+            sessionService.saveMessageAsync(sessionId, AiConstants.ROLE_ASSISTANT, answer, answerTokens);
         } catch (Exception e) {
             log.error("AI 会话记忆写入失败: sessionId={}", sessionId, e);
         } finally {
             emitter.complete();
         }
+    }
+
+    /**
+     * 取实际 token 数，模型未返回时按文本估算
+     */
+    private int resolveTokens(Integer actualTokens, String fallbackText) {
+        if (actualTokens != null && actualTokens > 0) {
+            return actualTokens;
+        }
+        return TokenEstimator.estimate(fallbackText);
     }
 
     /**

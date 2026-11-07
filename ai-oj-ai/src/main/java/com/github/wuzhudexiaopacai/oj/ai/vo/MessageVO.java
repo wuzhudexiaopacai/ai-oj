@@ -37,7 +37,7 @@ public class MessageVO implements Serializable {
     /**
      * 消耗 token 数
      */
-    @Schema(description = "消耗 token 数；当前落库固定为 0（预留字段）", example = "0")
+    @Schema(description = "消耗 token 数；优先取模型返回的 usage，流式未返回 usage 时按字符估算", example = "128")
     private Integer tokens;
 
     /**

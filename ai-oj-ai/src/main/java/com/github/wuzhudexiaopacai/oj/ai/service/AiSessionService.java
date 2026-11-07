@@ -62,6 +62,7 @@ public interface AiSessionService {
      * @param sessionId 会话 ID
      * @param role      角色
      * @param content   内容
+     * @param tokens    消耗 token 数（模型未返回 usage 时传入估算值，null 视为 0）
      */
-    void saveMessageAsync(Long sessionId, String role, String content);
+    void saveMessageAsync(Long sessionId, String role, String content, Integer tokens);
 }

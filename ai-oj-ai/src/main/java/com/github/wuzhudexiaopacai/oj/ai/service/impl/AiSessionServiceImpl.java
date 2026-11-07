@@ -104,13 +104,13 @@ public class AiSessionServiceImpl implements AiSessionService {
      */
     @Async
     @Override
-    public void saveMessageAsync(Long sessionId, String role, String content) {
+    public void saveMessageAsync(Long sessionId, String role, String content, Integer tokens) {
         try {
             AiMessage message = new AiMessage();
             message.setSessionId(sessionId);
             message.setRole(role);
             message.setContent(content);
-            message.setTokens(0);
+            message.setTokens(tokens == null || tokens < 0 ? 0 : tokens);
             messageMapper.insert(message);
         } catch (Exception e) {
             log.error("AI 消息异步落库失败: sessionId={}, role={}", sessionId, role, e);
