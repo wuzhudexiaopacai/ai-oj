@@ -78,6 +78,7 @@ public class ContestRecordService {
             dto.setTotalScore(r.getTotalScore());
             dto.setAcceptCount(r.getAcceptCount());
             dto.setPenaltySeconds(r.getPenaltySeconds());
+            dto.setRankSnapshot(r.getRankSnapshot());
             return dto;
         }).toList();
     }

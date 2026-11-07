@@ -38,4 +38,10 @@ public class ContestRecordDTO implements Serializable {
      */
     @Schema(description = "ACM 罚时（秒）：首次通过时间 − 比赛开始时间 + 错误提交惩罚，OI 模式不使用", example = "1800")
     private Long penaltySeconds;
+
+    /**
+     * 结算名次快照（比赛结束时由判题服务按赛制结算写入，未结算为 null）
+     */
+    @Schema(description = "结算名次快照（比赛结束后写入，1 表示第一名）；未结算时为 null，实时榜单不使用该字段", example = "3")
+    private Integer rankSnapshot;
 }

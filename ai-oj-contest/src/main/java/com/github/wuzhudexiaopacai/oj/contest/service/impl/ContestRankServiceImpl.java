@@ -25,6 +25,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -75,10 +76,38 @@ public class ContestRankServiceImpl implements ContestRankService {
                     return buildRankFromRecords(records);
                 }
             }
+            // Redis 快照丢失（如重启/过期）时回读 DB 结算名次，避免封榜后向普通用户泄露实时榜单
+            List<ContestRecordDTO> settled = loadSettledRecords(contestId);
+            if (!settled.isEmpty()) {
+                log.info("封榜快照缺失，已回读 rank_snapshot 兜底 contestId={} count={}", contestId, settled.size());
+                return buildRankFromRecords(settled);
+            }
             log.warn("比赛已封榜但排行榜快照缺失，降级为实时查询 contestId={}", contestId);
         }
         // 实时榜每次从成绩源重建：增量 ZSet 会漏掉未增量写入/缓存过期的用户，导致榜单人数不全
         return rebuildRank(contest);
+    }
+
+    /**
+     * 回读比赛结算名次（contest_record.rank_snapshot），按名次升序返回，未结算的记录不参与
+     *
+     * @param contestId 比赛 ID
+     * @return 已结算成绩记录；判题服务不可用或无结算数据时返回空列表
+     */
+    private List<ContestRecordDTO> loadSettledRecords(Long contestId) {
+        try {
+            Result<List<ContestRecordDTO>> result = judgeFeignClient.listContestRecord(contestId);
+            if (result == null || !result.isSuccess() || result.getData() == null) {
+                return Collections.emptyList();
+            }
+            return result.getData().stream()
+                    .filter(record -> record.getRankSnapshot() != null && record.getRankSnapshot() > 0)
+                    .sorted(Comparator.comparingInt(ContestRecordDTO::getRankSnapshot))
+                    .toList();
+        } catch (Exception e) {
+            log.warn("回读比赛结算名次失败 contestId={}", contestId, e);
+            return Collections.emptyList();
+        }
     }
 
     /**
