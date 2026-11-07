@@ -286,6 +286,8 @@ public class ProblemServiceImpl implements ProblemService {
         dto.setOutputDesc(problem.getOutputDesc());
         dto.setTimeLimit(problem.getTimeLimit());
         dto.setMemoryLimit(problem.getMemoryLimit());
+        dto.setStackLimit(problem.getStackLimit());
+        dto.setIoScore(Objects.equals(problem.getIoScore(), 1));
         dto.setIsSpj(Objects.equals(problem.getIsSpj(), 1));
         dto.setSpjLanguage(problem.getSpjLanguage());
         dto.setSpjCode(problem.getSpjCode());

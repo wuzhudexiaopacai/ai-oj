@@ -92,6 +92,12 @@ pub struct JudgeRequest {
     pub code: String,
     pub time_limit_ms: u64,
     pub memory_limit_mb: u64,
+    /// 栈空间限制（MB），缺省时按 256MB
+    #[serde(default)]
+    pub stack_limit_mb: Option<u64>,
+    /// 是否 OI 计分：true 按用例分值累加，false 为 ACM 全对才计分
+    #[serde(default)]
+    pub io_score: Option<bool>,
     pub cases: Vec<JudgeCase>,
     pub spj: Option<SpjSpec>,
 }

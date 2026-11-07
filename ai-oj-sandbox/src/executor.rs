@@ -110,16 +110,19 @@ impl Executor {
         lang: &LanguageConfig,
         time_limit_ms: u64,
         memory_limit_mb: u64,
+        stack_limit_mb: u64,
     ) -> Result<CaseRunOutcome, SandboxError> {
         let task_dir = self.task_dir(task_id);
         // 容器内 timeout 秒数（向上取整，含语言时间补偿）
         let limit_ms = (time_limit_ms as f64 * lang.time_factor) as u64;
         let timeout_secs = ((limit_ms + 999) / 1000).max(1);
+        // 栈空间限制（KB）：ulimit 不受支持时忽略，不影响判题
+        let stack_kb = stack_limit_mb * 1024;
         // timeout 触发 TLE 时退出码为 124；
         // 程序结束后读取容器自身 cgroup 的内存峰值（memory.peak）写入 .mem，
         // 短时间运行的程序无法被 Docker stats 秒级采样捕获，cgroup 峰值是准确的兜底来源。
         let shell_cmd = format!(
-            "timeout {} {} < case_{seq}.in > case_{seq}.out 2> case_{seq}.err; rc=$?; \
+            "ulimit -s {stack_kb} 2>/dev/null; timeout {} {} < case_{seq}.in > case_{seq}.out 2> case_{seq}.err; rc=$?; \
              cat /sys/fs/cgroup/memory.peak > case_{seq}.mem 2>/dev/null; \
              cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes >> case_{seq}.mem 2>/dev/null; \
              exit $rc",
@@ -385,6 +388,7 @@ impl Executor {
                     lang,
                     req.time_limit_ms,
                     req.memory_limit_mb,
+                    req.stack_limit_mb.unwrap_or(256),
                 )
                 .await?;
 
@@ -430,7 +434,7 @@ impl Executor {
             .map(|c| c.status)
             .max_by_key(|s| s.severity())
             .unwrap_or(Status::Accepted);
-        let total_score = results.iter().map(|c| c.score).sum();
+        let total_score = compute_total_score(req.io_score.unwrap_or(false), &results);
 
         Ok(JudgeResponse {
             submission_id: req.submission_id,
@@ -479,7 +483,7 @@ impl Executor {
                 .memory_limit_mb
                 .unwrap_or(self.config.default_memory_limit_mb);
             let outcome = self
-                .run_case(&task_id, 0, lang, time_limit, memory_limit)
+                .run_case(&task_id, 0, lang, time_limit, memory_limit, 256)
                 .await?;
 
             Ok(RunResponse {
@@ -540,5 +544,58 @@ fn compare_output(expected: &str, actual: &str) -> Status {
         Status::Accepted
     } else {
         Status::WrongAnswer
+    }
+}
+
+/// 汇总得分：OI 模式按用例分值累加；ACM 模式必须全部 AC 才计分，否则 0
+fn compute_total_score(io_score: bool, results: &[CaseResult]) -> u32 {
+    if io_score {
+        return results.iter().map(|c| c.score).sum();
+    }
+    if results.iter().all(|c| matches!(c.status, Status::Accepted)) {
+        results.iter().map(|c| c.score).sum()
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn case_result(status: Status, score: u32) -> CaseResult {
+        CaseResult {
+            seq: 1,
+            status,
+            time_ms: 0,
+            memory_kb: 0,
+            score,
+            output_preview: String::new(),
+        }
+    }
+
+    #[test]
+    fn oi_mode_should_sum_partial_scores() {
+        let results = vec![
+            case_result(Status::Accepted, 30),
+            case_result(Status::WrongAnswer, 0),
+            case_result(Status::Accepted, 30),
+        ];
+        assert_eq!(compute_total_score(true, &results), 60);
+    }
+
+    #[test]
+    fn acm_mode_should_require_all_accepted() {
+        let partial = vec![
+            case_result(Status::Accepted, 50),
+            case_result(Status::WrongAnswer, 0),
+        ];
+        assert_eq!(compute_total_score(false, &partial), 0);
+
+        let all_accepted = vec![
+            case_result(Status::Accepted, 50),
+            case_result(Status::Accepted, 50),
+        ];
+        assert_eq!(compute_total_score(false, &all_accepted), 100);
     }
 }

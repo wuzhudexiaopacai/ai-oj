@@ -56,6 +56,18 @@ public class ProblemJudgeDTO implements Serializable {
     private Integer memoryLimit;
 
     /**
+     * 栈空间限制（MB），未配置时判题侧回落为 256MB
+     */
+    @Schema(description = "栈空间限制（MB），空/0 时判题侧回落为 256MB", example = "64")
+    private Integer stackLimit;
+
+    /**
+     * 是否 OI 计分模式
+     */
+    @Schema(description = "是否 OI 计分：true 按用例分值累加，false 为 ACM 全对才计分", example = "false")
+    private Boolean ioScore;
+
+    /**
      * 是否 Special Judge
      */
     @Schema(description = "是否特殊判题（Special Judge）", example = "false")

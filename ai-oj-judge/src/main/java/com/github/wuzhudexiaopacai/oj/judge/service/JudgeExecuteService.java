@@ -67,6 +67,11 @@ public class JudgeExecuteService {
      */
     private static final int RETRY_DELAY_LEVEL = 3;
 
+    /**
+     * 题目未配置 stack_limit 时的默认栈空间（MB）
+     */
+    private static final int DEFAULT_STACK_LIMIT_MB = 256;
+
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
     private final JudgeCaseResultMapper judgeCaseResultMapper;
@@ -244,7 +249,20 @@ public class JudgeExecuteService {
                 ? new SandboxJudgeRequest.SpjItem(problem.getSpjLanguage(), problem.getSpjCode())
                 : null;
         return new SandboxJudgeRequest(submission.getId(), submission.getLanguage(), submission.getCode(),
-                problem.getTimeLimit(), problem.getMemoryLimit(), cases, spj);
+                problem.getTimeLimit(), problem.getMemoryLimit(),
+                resolveStackLimit(problem), Boolean.TRUE.equals(problem.getIoScore()), cases, spj);
+    }
+
+    /**
+     * 题目未配置栈限制时回落 256MB
+     *
+     * @param problem 题目判题信息
+     * @return 栈空间限制（MB）
+     */
+    private Integer resolveStackLimit(ProblemJudgeDTO problem) {
+        return problem.getStackLimit() == null || problem.getStackLimit() <= 0
+                ? DEFAULT_STACK_LIMIT_MB
+                : problem.getStackLimit();
     }
 
     /**

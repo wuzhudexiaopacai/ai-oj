@@ -13,6 +13,8 @@ import java.util.List;
  * @param code          提交代码
  * @param timeLimitMs   时间限制（毫秒）
  * @param memoryLimitMb 内存限制（MB）
+ * @param stackLimitMb  栈空间限制（MB）
+ * @param ioScore       是否 OI 计分（按用例分值累加；false 为 ACM 全对计分）
  * @param cases         评测用例
  * @param spj           Special Judge（无则为 null）
  * @author wuzhudexiaopacai
@@ -24,6 +26,8 @@ public record SandboxJudgeRequest(Long submissionId,
                                   String code,
                                   Integer timeLimitMs,
                                   Integer memoryLimitMb,
+                                  Integer stackLimitMb,
+                                  Boolean ioScore,
                                   List<CaseItem> cases,
                                   SpjItem spj) {
 
