@@ -26,3 +26,18 @@ export function getProblemLanguages(id) {
 export function createSolution(data) {
   return request.post('/solution', data)
 }
+
+/** 题解分页（列表不返回正文 content） */
+export function pageSolutions(problemId, params = {}) {
+  return request.get('/solution/page', { params: { problemId, pageNum: 1, pageSize: 10, ...params } })
+}
+
+/** 题解详情（含 Markdown 正文与作者昵称） */
+export function getSolutionDetail(id) {
+  return request.get(`/solution/${id}`)
+}
+
+/** 点赞/取消点赞（切换），返回 { liked, likeCount } */
+export function toggleSolutionLike(id) {
+  return request.post(`/solution/${id}/like`)
+}

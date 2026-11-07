@@ -45,6 +45,9 @@
               <el-tab-pane label="提交记录" name="submissions">
                 <MySubmissions ref="submissionsRef" :problem-id="problem.id" />
               </el-tab-pane>
+              <el-tab-pane label="题解" name="solutions" lazy>
+                <SolutionPanel :problem-id="problem.id" />
+              </el-tab-pane>
             </el-tabs>
           </template>
           <el-empty v-else-if="!loading" description="题目不存在" />
@@ -146,6 +149,7 @@ import { formatMemory } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import CodeEditor from '@/components/CodeEditor.vue'
 import MarkdownView from '@/components/MarkdownView.vue'
+import SolutionPanel from '@/components/SolutionPanel.vue'
 import DifficultyTag from '@/components/DifficultyTag.vue'
 import JudgeStatusTag from '@/components/JudgeStatusTag.vue'
 import CopyButton from '@/components/CopyButton.vue'

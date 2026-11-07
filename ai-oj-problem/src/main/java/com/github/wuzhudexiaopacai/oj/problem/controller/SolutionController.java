@@ -5,6 +5,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.problem.dto.SolutionSaveDTO;
 import com.github.wuzhudexiaopacai.oj.problem.service.SolutionService;
+import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionLikeVO;
 import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -62,5 +63,13 @@ public class SolutionController {
             expire = 10, unit = TimeUnit.SECONDS, message = "请勿重复提交题解")
     public Result<Long> create(@Valid @RequestBody SolutionSaveDTO saveDTO) {
         return Result.ok(solutionService.create(saveDTO));
+    }
+
+    @Operation(summary = "点赞/取消点赞", description = "对状态正常的题解点赞或取消点赞（同一用户重复调用为切换），点赞关系记录在 Redis 去重，点赞数原子更新到 pms_solution.like_count。返回切换后的点赞状态与最新点赞数。需登录。")
+    @PostMapping("/{id}/like")
+    public Result<SolutionLikeVO> toggleLike(
+            @PathVariable("id")
+            @Parameter(description = "题解 ID", required = true, example = "20001") Long id) {
+        return Result.ok(solutionService.toggleLike(id));
     }
 }

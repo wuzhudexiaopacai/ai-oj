@@ -2,6 +2,7 @@ package com.github.wuzhudexiaopacai.oj.problem.service;
 
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.problem.dto.SolutionSaveDTO;
+import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionLikeVO;
 import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionVO;
 
 /**
@@ -37,4 +38,12 @@ public interface SolutionService {
      * @return 题解 ID
      */
     Long create(SolutionSaveDTO saveDTO);
+
+    /**
+     * 点赞/取消点赞（同一用户重复点击为切换，Redis 去重）
+     *
+     * @param id 题解 ID
+     * @return 点赞结果
+     */
+    SolutionLikeVO toggleLike(Long id);
 }
