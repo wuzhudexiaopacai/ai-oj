@@ -1,0 +1,108 @@
+# Elasticsearch 8.19.21 单节点(题库搜索依赖)
+# 注意:ES 不允许以 root 运行(镜像内 uid 1000),hostPath 需由 initContainer 修正属主
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: es-config
+  namespace: ai-oj
+data:
+  elasticsearch.yml: |
+    cluster.name: ai-oj
+    node.name: es-0
+    discovery.type: single-node
+    network.host: 0.0.0.0
+    xpack.security.enabled: false
+    xpack.security.http.ssl.enabled: false
+    xpack.security.transport.ssl.enabled: false
+    bootstrap.memory_lock: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: ai-oj
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: ai-oj
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      initContainers:
+        - name: fix-perms
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "chown -R 1000:1000 /usr/share/elasticsearch/data"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ES_JAVA_OPTS
+              value: "-Xms256m -Xmx256m"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 9200
+              name: http
+            - containerPort: 9300
+              name: transport
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+              subPath: elasticsearch.yml
+              readOnly: true
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health?wait_for_status=yellow&timeout=5s
+              port: 9200
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 120
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: es-config
+        - name: data
+          hostPath:
+            path: /data/ai-oj/es
+            type: DirectoryOrCreate

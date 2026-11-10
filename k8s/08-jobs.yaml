@@ -1,0 +1,76 @@
+# 一次性初始化任务:建 MinIO bucket、把配置发布到 Nacos
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: ai-oj
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: minio-init
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      containers:
+        - name: mc
+          image: docker.io/minio/mc:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until mc alias set local http://minio:9000 minioadmin minioadmin123; do
+                echo "waiting for minio..."; sleep 2
+              done
+              mc mb --ignore-existing local/ai-oj
+              mc mb --ignore-existing local/ai-oj-public
+              mc anonymous set download local/ai-oj-public || true
+              echo "minio init done"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nacos-config-import
+  namespace: ai-oj
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: nacos-config-import
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      containers:
+        - name: curl
+          image: docker.io/curlimages/curl:8.10.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until curl -sf http://nacos:8848/nacos/v1/console/health/readiness >/dev/null; do
+                echo "waiting for nacos..."; sleep 3
+              done
+              for f in /configs/*.yaml; do
+                echo ">>> publish $(basename "$f")"
+                curl -s -X POST "http://nacos:8848/nacos/v1/cs/configs" \
+                  --data-urlencode "dataId=$(basename "$f")" \
+                  --data-urlencode "group=DEFAULT_GROUP" \
+                  --data-urlencode "type=yaml" \
+                  --data-urlencode "content@$f"
+                echo
+              done
+              echo "nacos config import done"
+          volumeMounts:
+            - name: configs
+              mountPath: /configs
+              readOnly: true
+      volumes:
+        - name: configs
+          configMap:
+            name: nacos-configs

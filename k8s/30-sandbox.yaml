@@ -1,0 +1,158 @@
+# 判题沙箱:Rust 服务 + DinD(Docker-in-Docker)
+#
+# 为什么需要 DinD:
+#   沙箱通过 /var/run/docker.sock 启动 sibling 评测容器(见 ai-oj-sandbox/src/docker.rs),
+#   但 K8s 节点只有 containerd、没有 Docker 守护进程,所以在 Pod 内跑一个特权 DinD。
+#
+# 卷共享说明:
+#   沙箱服务把任务文件写在 /work,评测容器挂载 Docker volume "ai-oj-work" 到 /work。
+#   为了让两者看到同一份数据,把同一个 hostPath 同时挂到:
+#     - dind: /var/lib/docker/volumes/ai-oj-work/_data(即 docker volume 的数据目录)
+#     - sandbox: /work
+#
+# 语言镜像(gcc/python/java 等)由 DinD 通过 docker.m.daocloud.io 按需拉取;
+# 也可把 docker save 的 tar 放到 k8s03:/data/ai-oj/sandbox/images 后由 dind 启动时自动 docker load。
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-sandbox
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-sandbox
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-sandbox
+  namespace: ai-oj
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ai-oj-sandbox
+  template:
+    metadata:
+      labels:
+        app: ai-oj-sandbox
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        # ---------- DinD ----------
+        - name: dind
+          image: docker.io/library/docker:dind
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+            - name: TZ
+              value: Asia/Shanghai
+          command:
+            - sh
+            - -c
+            - |
+              dockerd \
+                --host=unix:///var/run/docker.sock \
+                --data-root=/var/lib/docker \
+                --storage-driver=vfs \
+                --registry-mirror=https://docker.m.daocloud.io \
+                >/var/log/dockerd.log 2>&1 &
+              until docker info >/dev/null 2>&1; do sleep 1; done
+              # 可选:预置语言镜像 tar 自动加载(目录为空则跳过)
+              if [ -z "$(ls -A /images 2>/dev/null)" ]; then
+                echo "no preloaded language images"
+              else
+                for f in /images/*.tar; do
+                  echo "loading $f"; docker load -i "$f" || true
+                done
+              fi
+              # 创建与沙箱共享的 volume
+              docker volume create ai-oj-work || true
+              echo "dind ready"
+              wait
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run
+            - name: dind-data
+              mountPath: /var/lib/docker
+            - name: work
+              mountPath: /var/lib/docker/volumes/ai-oj-work/_data
+            - name: images
+              mountPath: /images
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+        # ---------- sandbox ----------
+        - name: sandbox
+          image: docker.io/ai-oj/sandbox:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            - name: SANDBOX_LISTEN
+              value: 0.0.0.0:8000
+            - name: SANDBOX_MAX_PARALLEL
+              value: "4"
+            - name: SANDBOX_WORK_DIR
+              value: /work
+            - name: SANDBOX_WORK_VOLUME
+              value: ai-oj-work
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 8000
+              name: http
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run
+            - name: work
+              mountPath: /work
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: docker-sock
+          emptyDir: {}
+        - name: dind-data
+          hostPath:
+            path: /data/ai-oj/sandbox/docker
+            type: DirectoryOrCreate
+        - name: work
+          hostPath:
+            path: /data/ai-oj/sandbox/work
+            type: DirectoryOrCreate
+        - name: images
+          hostPath:
+            path: /data/ai-oj/sandbox/images
+            type: DirectoryOrCreate

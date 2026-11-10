@@ -1,0 +1,562 @@
+# AI-OJ 8 个微服务:Deployment + ClusterIP Service
+# 注册到 Nacos 的服务名(spring.application.name)与下方 Service 名一致,网关可按 lb://ai-oj-xxx 路由
+# 节点分工:gateway/auth/problem/contest → k8s02;judge/file/ai/log → k8s03
+
+# ============================ gateway ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-gateway
+  namespace: ai-oj
+spec:
+  type: NodePort
+  selector:
+    app: ai-oj-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30088
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-gateway
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-gateway
+  template:
+    metadata:
+      labels:
+        app: ai-oj-gateway
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      containers:
+        - name: gateway
+          image: docker.io/ai-oj/gateway:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ auth ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-auth
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-auth
+  ports:
+    - name: http
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-auth
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-auth
+  template:
+    metadata:
+      labels:
+        app: ai-oj-auth
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      containers:
+        - name: auth
+          image: docker.io/ai-oj/auth:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 9001
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9001
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9001
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ problem ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-problem
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-problem
+  ports:
+    - name: http
+      port: 9002
+      targetPort: 9002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-problem
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-problem
+  template:
+    metadata:
+      labels:
+        app: ai-oj-problem
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      containers:
+        - name: problem
+          image: docker.io/ai-oj/problem:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 9002
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9002
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9002
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ contest ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-contest
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-contest
+  ports:
+    - name: http
+      port: 9004
+      targetPort: 9004
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-contest
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-contest
+  template:
+    metadata:
+      labels:
+        app: ai-oj-contest
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s02
+      containers:
+        - name: contest
+          image: docker.io/ai-oj/contest:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 9004
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9004
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9004
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ judge ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-judge
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-judge
+  ports:
+    - name: http
+      port: 9003
+      targetPort: 9003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-judge
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-judge
+  template:
+    metadata:
+      labels:
+        app: ai-oj-judge
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: judge
+          image: docker.io/ai-oj/judge:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 9003
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9003
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9003
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ file ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-file
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-file
+  ports:
+    - name: http
+      port: 9005
+      targetPort: 9005
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-file
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-file
+  template:
+    metadata:
+      labels:
+        app: ai-oj-file
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: file
+          image: docker.io/ai-oj/file:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 9005
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9005
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9005
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ ai ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-ai
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-ai
+  ports:
+    - name: http
+      port: 9006
+      targetPort: 9006
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-ai
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-ai
+  template:
+    metadata:
+      labels:
+        app: ai-oj-ai
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: ai
+          image: docker.io/ai-oj/ai:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+            - name: DASHSCOPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: dashscope-api-key
+          ports:
+            - containerPort: 9006
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9006
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9006
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi
+---
+# ============================ log ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-oj-log
+  namespace: ai-oj
+spec:
+  selector:
+    app: ai-oj-log
+  ports:
+    - name: http
+      port: 9007
+      targetPort: 9007
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-oj-log
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-oj-log
+  template:
+    metadata:
+      labels:
+        app: ai-oj-log
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: log
+          image: docker.io/ai-oj/log:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NACOS_ADDR
+              value: nacos:8848
+            - name: SPRING_CLOUD_NACOS_USERNAME
+              value: nacos
+            - name: SPRING_CLOUD_NACOS_PASSWORD
+              value: nacos
+            - name: TZ
+              value: Asia/Shanghai
+            - name: JAVA_OPTS
+              value: "-Xms96m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+ExitOnOutOfMemoryError"
+          ports:
+            - containerPort: 9007
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9007
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 9007
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi

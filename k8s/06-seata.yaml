@@ -1,0 +1,85 @@
+# Seata 2.3.0:分布式事务(file 存储 + Nacos 注册)
+apiVersion: v1
+kind: Service
+metadata:
+  name: seata-server
+  namespace: ai-oj
+spec:
+  selector:
+    app: seata-server
+  ports:
+    - name: seata
+      port: 8091
+      targetPort: 8091
+    - name: console
+      port: 7091
+      targetPort: 7091
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seata-server
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seata-server
+  template:
+    metadata:
+      labels:
+        app: seata-server
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: seata
+          image: docker.io/apache/seata-server:2.3.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SEATA_PORT
+              value: "8091"
+            # 镜像默认 -Xmx2048m,按 4G 节点的资源限制调小
+            - name: JVM_XMS
+              value: "128m"
+            - name: JVM_XMX
+              value: "512m"
+            - name: JVM_MetaspaceSize
+              value: "64m"
+            - name: JVM_MaxMetaspaceSize
+              value: "128m"
+            - name: JVM_MaxDirectMemorySize
+              value: "128m"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 8091
+              name: seata
+            - containerPort: 7091
+              name: console
+          volumeMounts:
+            - name: config
+              mountPath: /seata-server/resources/application.yml
+              subPath: application.yml
+              readOnly: true
+            - name: logs
+              mountPath: /root/logs
+          readinessProbe:
+            tcpSocket:
+              port: 8091
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: config
+          configMap:
+            name: seata-config
+        - name: logs
+          emptyDir: {}

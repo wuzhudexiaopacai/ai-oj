@@ -1,0 +1,159 @@
+# RocketMQ 5.3.2:namesrv + broker(单机)
+apiVersion: v1
+kind: Service
+metadata:
+  name: rocketmq-namesrv
+  namespace: ai-oj
+spec:
+  selector:
+    app: rocketmq-namesrv
+  ports:
+    - name: namesrv
+      port: 9876
+      targetPort: 9876
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rocketmq-namesrv
+  namespace: ai-oj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rocketmq-namesrv
+  template:
+    metadata:
+      labels:
+        app: rocketmq-namesrv
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: namesrv
+          image: docker.io/apache/rocketmq:5.3.2
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "mqnamesrv"]
+          securityContext:
+            runAsUser: 0
+          env:
+            - name: JAVA_OPT_EXT
+              value: "-Xms128m -Xmx256m -Xmn128m"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 9876
+              name: namesrv
+          volumeMounts:
+            - name: logs
+              mountPath: /home/rocketmq/logs
+          readinessProbe:
+            tcpSocket:
+              port: 9876
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: logs
+          hostPath:
+            path: /data/ai-oj/rocketmq/logs
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rocketmq-broker
+  namespace: ai-oj
+spec:
+  selector:
+    app: rocketmq-broker
+  ports:
+    - name: fast
+      port: 10909
+      targetPort: 10909
+    - name: broker
+      port: 10911
+      targetPort: 10911
+    - name: ha
+      port: 10912
+      targetPort: 10912
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rocketmq-broker
+  namespace: ai-oj
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rocketmq-broker
+  template:
+    metadata:
+      labels:
+        app: rocketmq-broker
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s03
+      containers:
+        - name: broker
+          image: docker.io/apache/rocketmq:5.3.2
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "mqbroker", "-n", "rocketmq-namesrv:9876", "-c", "/home/rocketmq/conf/broker.conf"]
+          # hostPath 由 kubelet 以 root 创建,镜像默认 uid 3000 无法写 store/logs
+          securityContext:
+            runAsUser: 0
+          env:
+            - name: JAVA_OPT_EXT
+              value: "-Xms256m -Xmx512m -Xmn128m"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 10909
+              name: fast
+            - containerPort: 10911
+              name: broker
+            - containerPort: 10912
+              name: ha
+          volumeMounts:
+            - name: conf
+              mountPath: /home/rocketmq/conf/broker.conf
+              subPath: broker.conf
+              readOnly: true
+            - name: store
+              mountPath: /home/rocketmq/store
+            - name: logs
+              mountPath: /home/rocketmq/logs
+          readinessProbe:
+            tcpSocket:
+              port: 10911
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: conf
+          configMap:
+            name: rocketmq-broker-config
+        - name: store
+          hostPath:
+            path: /data/ai-oj/rocketmq/store
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/ai-oj/rocketmq/logs
+            type: DirectoryOrCreate
