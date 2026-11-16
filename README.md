@@ -69,7 +69,8 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 
 - **题库**：题号/标题关键字、难度、标签多选筛选，Elasticsearch 全文检索（不可用时自动降级为数据库 LIKE）
 - **做题**：Monaco 编辑器、语言模板、样例与自测、运行结果逐用例展示、错误用例下载；题面支持 KaTeX 数学公式与代码高亮，样例/用例/提交代码一键复制
-- **提交**：WebSocket 实时判题进度，断线自动降级为轮询；提交记录表格支持点击行展开详情抽屉（源代码 + 逐用例判题结果 + 耗时内存）
+- **提交**：WebSocket 实时判题进度，断线自动降级为轮询；提交记录表格支持点击行展开详情抽屉（源代码 + 代码长度 + 逐用例判题结果 + 耗时内存）
+- **题解**：题目页「题解」标签页浏览/发布解题思路（Markdown + KaTeX 渲染），支持点赞与取消点赞，点赞数由 Redis Set 去重后原子累加
 - **比赛**：ACM / OI 两种赛制、公开 / 私有 / 密码赛、赛内倒计时、封榜、实时排行榜（图表 + 排名双视图，标记「我」）
 - **个人中心**：资料编辑、头像上传、我的提交、我的比赛，自动统计提交总数与通过题数
 - **AI 助手**：题目页可停靠悬浮球（拖拽移动、靠边收纳不遮挡题面），题目讲解、代码评审、提示词模板、流式输出，支持多场景会话
@@ -79,7 +80,8 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 - 题目管理：增删改查、测试用例（含大数据文件）、语言模板、Excel 导入导出
 - **AI 智能出题**：按知识点 + 难度生成结构化题目草稿（题面、用例、参考代码、题解），一键回填编辑表单；参考代码沙箱实跑校验用例期望输出；新建题目自动填充下一个可用题号
 - 比赛管理：创建/编辑/删除、绑定赛题、封榜设置
-- 用户 / 角色 / 权限：RBAC，22 条权限码与后端 `@PreAuthorize` 一一对应
+- **死信管理**（管理接口，暂无独立前端页面）：`biz_dead_letter` 分页查询（状态 / 关键字 / 时间范围）、消息重放、标记忽略并记录处理备注
+- 用户 / 角色 / 权限：RBAC，25 条权限码与后端 `@PreAuthorize` 一一对应
 - 数据总览
 
 ### 平台能力
@@ -268,8 +270,8 @@ docker compose restart ai-oj-gateway ai-oj-auth ai-oj-problem ai-oj-judge ai-oj-
 |---|---|
 | 认证 | `GET /auth/captcha`、`POST /auth/login`、`POST /auth/register`、`POST /auth/refresh`、`POST /auth/logout` |
 | 用户 | `GET /user/info`、`PUT /user/profile`、`PUT /user/password` |
-| 管理后台 | `/admin/user/**`、`/admin/role/**`、`/admin/permission/**`、`/admin/problem/**`、`PUT /admin/contest/{id}`、`DELETE /admin/contest/{id}` |
-| 题目 | `GET /problem/page`、`GET /problem/tags`、`GET /problem/{problemKey}`、`GET /problem/search`、`/solution/**` |
+| 管理后台 | `/admin/user/**`、`/admin/role/**`、`/admin/permission/**`、`/admin/problem/**`、`PUT /admin/contest/{id}`、`DELETE /admin/contest/{id}`、`GET /admin/dead-letter/page`、`POST /admin/dead-letter/{id}/replay`、`POST /admin/dead-letter/{id}/ignore` |
+| 题目 | `GET /problem/page`、`GET /problem/tags`、`GET /problem/{problemKey}`、`GET /problem/search`、`GET /solution/page`、`GET /solution/{id}`、`POST /solution`、`POST /solution/{id}/like` |
 | 判题 | `POST /judge/submit`、`POST /judge/run`、`POST /judge/validate-cases`、`GET /judge/progress`、`GET /submission/page`、`GET /submission/submit/{submitId}`、`GET /submission/{id}` |
 | 比赛 | `GET /contest/page`、`GET /contest/mine`、`GET /contest/{id}`、`POST /contest/{id}/register`、`DELETE /contest/{id}/register`、`GET /contest/{id}/rank` |
 | 文件 | `POST /file/upload/init`、`POST /file/upload/chunk`、`POST /file/upload/merge`、`POST /file/avatar`、`GET /file/{id}/url`、`GET /file/page` |
@@ -372,7 +374,7 @@ docker exec ai-oj-redis redis-cli GET "judge:progress:<submitId>"
 # 进入 MySQL
 docker exec -it ai-oj-mysql mysql -uroot -p
 
-# 查看死信表（重放需按业务人工处理）
+# 查看死信表（也可通过管理接口 GET /api/admin/dead-letter/page 分页查看、重放或忽略）
 docker exec -it ai-oj-mysql mysql -uroot -p -e "USE ai_oj_judge; SELECT * FROM biz_dead_letter ORDER BY id DESC LIMIT 20;"
 ```
 
@@ -419,14 +421,14 @@ ai-oj
 |---|---|
 | `ai_oj_auth` | `sys_user`（含 `submit_count` / `accept_count` 统计字段，由判题结果消息异步累加）、`sys_role`、`sys_permission`、`sys_user_role`、`sys_role_permission`、`sys_login_log` |
 | `ai_oj_problem` | `pms_problem`（`problem_key` 展示题号唯一）、`pms_test_case`、`pms_problem_language`、`pms_tag`、`pms_tag_category`、`pms_problem_tag`、`pms_solution` |
-| `ai_oj_judge` | `judge_submission`（`uk_submit_id` 唯一键做幂等兜底）、`judge_case_result`、`judge_sandbox`、`contest_record`、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
+| `ai_oj_judge` | `judge_submission`（`uk_submit_id` 唯一键做幂等兜底）、`judge_case_result`、`judge_sandbox`（`last_heartbeat` 记录心跳）、`contest_record`（`rank_snapshot` 由比赛结束结算写入）、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
 | `ai_oj_contest` | `contest`、`contest_problem`、`contest_registration`（`contest_id + user_id` 唯一）、`undo_log` |
 | `ai_oj_file` | `file_record` |
 | `ai_oj_ai` | `ai_session`、`ai_message`、`ai_prompt_template` |
 
 种子数据：
 
-- `admin / admin123`（BCrypt），角色 `ROLE_ADMIN` / `ROLE_USER`，22 条权限（与 `@PreAuthorize` 一一对应）
+- `admin / admin123`（BCrypt），角色 `ROLE_ADMIN` / `ROLE_USER`，25 条权限（与 `@PreAuthorize` 一一对应，含死信管理 `judge:deadletter:list` / `judge:deadletter:handle`）
 - 示例题 `A1001 两数之和`，2 条测试用例，4 份语言模板（java / cpp / python / go）
 - 标签分类 2 个、标签 5 个
 
@@ -459,7 +461,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 - **状态机**：Spring StateMachine 工厂模式，每次消费新建实例；状态以 `judge_submission.status` 为权威存储，不做内存持久态
 - **进度通道**：WebSocket `/ws/judge` 为主，Redis `judge:progress:{submitId}` 缓存 + HTTP 轮询兜底
 - **卡死补偿**：Quartz 集群模式（JDBC 持久化，`QRTZ_*`），`0 * * * * ?` 每分钟扫描非终态且超时的提交，重试 3 次后置 `SYSTEM_ERROR` 并广播
-- **沙箱调度**：最小负载优先（Redis Hash `judge:sandbox:load`），失败节点拉黑 30s，最多重试 3 次
+- **沙箱调度**：最小负载优先（Redis Hash `judge:sandbox:load`），失败节点拉黑 30s，最多重试 3 次；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度
 
 ### AI 对话链路（POST + SSE）
 
@@ -475,6 +477,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 ```
 
 - 前端使用 `fetch + ReadableStream` 而非 `EventSource`，因为需要携带 `Authorization` 头；使用 **POST** 是因为代码可能数千行，放 URL 会超长
+- 流式结束后 user / assistant 两条消息异步落库；`ai_message.tokens` 优先取模型返回的 usage（prompt / completion tokens），流式未返回 usage 时按「CJK 1 字 = 1 token、其余 4 字符 = 1 token」估算
 - 其他 AI 接口：`POST /api/ai/review`（同步代码评审）、`POST /api/ai/task/submit`、`GET /api/ai/task/{taskId}`（异步任务，走 `AI_OJ_AI_TASK`）
 - `ChatModel` 由 `@Bean @RefreshScope` 构建，Nacos 中修改 DashScope 模型/参数后自动重建，无需重启；`DASHSCOPE_API_KEY` 通过宿主机 `.env` 注入，Nacos 配置只引用 `${DASHSCOPE_API_KEY}`
 - 前端 nginx 对 `/api` 的 `proxy_read_timeout / proxy_send_timeout` 为 310s，覆盖 SSE 长流与用例校验等长耗时接口
@@ -507,7 +510,7 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - **状态扫描**：`ContestStatusScanTask` 每 5s 执行，Redisson 锁 + 乐观锁，`SCHEDULED → RUNNING → ENDED`，发 `AI_OJ_CONTEST_EVENT:start/end` 并通过 `/ws/contest` 推送
 - **成绩计算**：`ContestRecordConsumer` 只处理 `contestId != 0` 的结果消息；同一用户同题用 Redis Set 去重；罚时 = 首次 AC 提交时间 − 比赛开始时间；OI 累加 `totalScore`
 - **独立计分**：仅统计比赛期间携带对应 `contestId` 的提交，赛前 AC 不继承
-- **排行榜**：实时经 judge Feign 拉取；封榜后非管理员读 Redis 快照（`contest:rank:{id}`，TTL 30s）；策略工厂排序（ACM 通过数降序 + 罚时升序，OI 总分降序）；只返回比赛期间有提交的用户，避免报名者全量上榜
+- **排行榜**：实时经 judge Feign 拉取；封榜后非管理员读 Redis 快照（`contest:rank:{id}`，TTL 30s），快照缺失时回读 `contest_record.rank_snapshot`（判题服务在比赛结束时按赛制结算写入）兜底，仍无数据才降级实时榜；策略工厂排序（ACM 通过数降序 + 罚时升序，OI 总分降序）；只返回比赛期间有提交的用户，避免报名者全量上榜
 
 ### 文件链路
 
@@ -538,7 +541,9 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - **内存**：读取 cgroup `memory.peak` 作为峰值
 - **输出**：上限 16MB，超出判 OLE
 - **语言补偿**：Java / Python / JavaScript 有独立时间/内存系数
+- **栈限制**：按题目 `stack_limit` 设置 `ulimit -s`（默认 256MB），深递归程序栈溢出按 RE 返回，不会拖垮沙箱
 - **答案比对**：忽略行尾空白；支持 SPJ
+- **计分模式**：OI（`io_score=true`）按用例分值累计；ACM 模式仅全部用例通过才计分，否则 0 分
 
 支持 **7 种语言**（`ai-oj-sandbox/languages.toml`）：
 
@@ -575,6 +580,14 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 
 19 位雪花 ID 超出 JS `Number.MAX_SAFE_INTEGER`，`JSON.parse` 会丢精度。方案：common-web 注册 `Jackson2ObjectMapperBuilderCustomizer`，将 `Long / long / BigInteger` 统一序列化为 **JSON 字符串**；前端路由拼接与比较全部按字符串处理。
 
+### 审计字段自动填充
+
+`BaseEntity` 统一声明 `createTime / updateTime / createBy / updateBy / deleted`，由 common-web 的 `MetaObjectHandler` 在写入时自动填充：
+
+- 时间与逻辑删除标记统一填充，业务代码无需关心
+- 审计人 `create_by / update_by` 从 `SecurityUtils.currentUserIdOrNull()` 取当前登录用户；MQ 消费线程、定时任务等无登录上下文的场景写入 `NULL`
+- 使用 `strictInsertFill / strictUpdateFill`，只填充值为 null 的字段，不覆盖调用方显式设置的值（如死信重放时按原消息回填操作人）
+
 ### 判题进度实时性
 
 主通道 WebSocket（`/ws/judge`）推送状态变更；兜底通道按 `submitId` 轮询，结果走 Redis 读缓存，WS 断线时体验不降级。
@@ -591,7 +604,7 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 | `AI_OJ_AI_TASK` | AI 异步任务（出题/批量评审） |
 | `AI_OJ_CONTEST_EVENT` | 比赛开始/结束事件 |
 
-- 消费失败重试 3 次后进入死信队列 `%DLQ%`，同时落 `biz_dead_letter` 表，可人工重放
+- 消费失败重试 3 次后进入死信队列 `%DLQ%`，同时落 `biz_dead_letter` 表；管理端 `/api/admin/dead-letter/**` 支持分页查看、原样重放、标记忽略（记录处理备注 `handle_remark` 与状态）
 - 跨服务写操作（比赛报名）走 **Seata AT**，各库带 `undo_log`
 - Quartz 集群调度故障自动接管，补偿卡死判题
 
@@ -637,7 +650,8 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 
 ## 路线图
 
-- [ ] 单元测试与集成测试补齐（Judge 状态机、沙箱结果聚合、缓存三防）
+- [x] 核心单元测试（审计字段填充、死信重放、沙箱心跳、题解点赞、token 统计、排行榜快照兜底）
+- [ ] 集成测试补齐（Judge 状态机、沙箱结果聚合、缓存三防）
 - [ ] 接入 GitHub Actions：Maven 编译、前端构建、Rust `cargo clippy`
 - [ ] 判题沙箱支持更多语言（Rust 模板、C#、Kotlin）
 - [ ] AI 出题支持多轮改写与批量生成（结合异步任务 `AI_OJ_AI_TASK`）
