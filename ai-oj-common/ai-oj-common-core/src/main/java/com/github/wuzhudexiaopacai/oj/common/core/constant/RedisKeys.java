@@ -52,7 +52,7 @@ public class RedisKeys {
     public static final String JUDGE_USER_LOCK = "judge:lock:user:";
 
     /**
-     * 判题进度缓存（WebSocket 断线重连/轮询兜底）：+ submitId
+     * 判题进度缓存（WebSocket 断线重连/轮询兜底）：+ userId:submitId
      */
     public static final String JUDGE_PROGRESS = "judge:progress:";
 

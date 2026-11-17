@@ -13,7 +13,7 @@ SET NAMES utf8mb4;
 DROP TABLE IF EXISTS judge_submission;
 CREATE TABLE judge_submission (
     id             BIGINT       NOT NULL COMMENT '提交记录ID',
-    submit_id      VARCHAR(64)  NOT NULL COMMENT '幂等提交标识（客户端生成，唯一键防重）',
+    submit_id      VARCHAR(64)  NOT NULL COMMENT '幂等提交标识（客户端生成，与 user_id 组成唯一键防重）',
     user_id        BIGINT       NOT NULL COMMENT '提交用户',
     problem_id     BIGINT       NOT NULL COMMENT '题目ID',
     contest_id     BIGINT       NOT NULL DEFAULT 0 COMMENT '比赛ID，0表示非比赛提交',
@@ -34,7 +34,7 @@ CREATE TABLE judge_submission (
     update_by      BIGINT       NULL,
     deleted        TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_submit_id (submit_id),
+    UNIQUE KEY uk_user_submit (user_id, submit_id),
     KEY idx_user_problem (user_id, problem_id),
     KEY idx_problem (problem_id),
     KEY idx_status (status),

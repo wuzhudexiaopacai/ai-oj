@@ -334,7 +334,8 @@ public class JudgeExecuteService {
         // 2. Redis 进度缓存（轮询兜底）
         JudgeProgressVO progress = SubmissionService.buildProgress(submission);
         try {
-            stringRedisTemplate.opsForValue().set(RedisKeys.JUDGE_PROGRESS + submission.getSubmitId(),
+            stringRedisTemplate.opsForValue().set(
+                    RedisKeys.JUDGE_PROGRESS + submission.getUserId() + ":" + submission.getSubmitId(),
                     objectMapper.writeValueAsString(progress), Duration.ofSeconds(progressTtlSeconds));
         } catch (Exception e) {
             log.warn("进度缓存写入失败 submitId={}", submission.getSubmitId(), e);

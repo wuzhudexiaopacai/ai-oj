@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class UserStatConsumer implements RocketMQListener<JudgeResultMessage> {
 
     /**
-     * 统计幂等标记前缀（+ submitId，TTL 7 天）
+     * 统计幂等标记前缀（+ userId:submitId，TTL 7 天）
      */
     private static final String STAT_IDEM_KEY = "auth:user:stat:idem:";
 
@@ -41,11 +41,11 @@ public class UserStatConsumer implements RocketMQListener<JudgeResultMessage> {
             log.warn("判题结果消息字段缺失，直接消费成功: {}", message);
             return;
         }
-        // 幂等：同一提交只统计一次，重复消息直接消费成功
-        String idemKey = STAT_IDEM_KEY + message.getSubmitId();
+        // 幂等：同一提交只统计一次，重复消息直接消费成功；submitId 仅用户内唯一，标记需带 userId
+        String idemKey = STAT_IDEM_KEY + message.getUserId() + ":" + message.getSubmitId();
         Boolean first = redisTemplate.opsForValue().setIfAbsent(idemKey, "1", 7, TimeUnit.DAYS);
         if (Boolean.FALSE.equals(first)) {
-            log.info("判题结果消息重复，跳过统计: submitId={}", message.getSubmitId());
+            log.info("判题结果消息重复，跳过统计: userId={} submitId={}", message.getUserId(), message.getSubmitId());
             return;
         }
         try {

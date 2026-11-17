@@ -51,7 +51,7 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 
 | 难点 | 本项目做法 |
 |---|---|
-| 判题幂等 | 注解幂等 + Redisson 频率锁 + `uk_submit_id` 唯一键三层兜底 |
+| 判题幂等 | 用户级幂等键（`userId + submitId` 先查后插）+ Redisson 频率锁 + `uk_user_submit` 唯一键兜底 |
 | 沙箱隔离 | Rust 服务为每次编译/运行拉起一次性 Docker 容器，断网 + 只读根文件系统 + cgroup 内存/CPU/PID 限制 |
 | 缓存三防 | 空值占位防穿透、分布式锁 DCL 防击穿、TTL 随机抖动防雪崩 |
 | 雪花 ID 精度 | 后端统一将 `Long` 序列化为 JSON 字符串，前端全程按字符串处理 |
@@ -369,7 +369,7 @@ docker compose ps
 docker exec ai-oj-redis redis-cli GET "auth:captcha:<captchaKey>"
 
 # 查看判题进度缓存
-docker exec ai-oj-redis redis-cli GET "judge:progress:<submitId>"
+docker exec ai-oj-redis redis-cli GET "judge:progress:<userId>:<submitId>"
 
 # 进入 MySQL
 docker exec -it ai-oj-mysql mysql -uroot -p
@@ -421,7 +421,7 @@ ai-oj
 |---|---|
 | `ai_oj_auth` | `sys_user`（含 `submit_count` / `accept_count` 统计字段，由判题结果消息异步累加）、`sys_role`、`sys_permission`、`sys_user_role`、`sys_role_permission`、`sys_login_log` |
 | `ai_oj_problem` | `pms_problem`（`problem_key` 展示题号唯一）、`pms_test_case`、`pms_problem_language`、`pms_tag`、`pms_tag_category`、`pms_problem_tag`、`pms_solution` |
-| `ai_oj_judge` | `judge_submission`（`uk_submit_id` 唯一键做幂等兜底）、`judge_case_result`、`judge_sandbox`（`last_heartbeat` 记录心跳）、`contest_record`（`rank_snapshot` 由比赛结束结算写入）、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
+| `ai_oj_judge` | `judge_submission`（`uk_user_submit` 唯一键做幂等兜底）、`judge_case_result`、`judge_sandbox`（`last_heartbeat` 记录心跳）、`contest_record`（`rank_snapshot` 由比赛结束结算写入）、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
 | `ai_oj_contest` | `contest`、`contest_problem`、`contest_registration`（`contest_id + user_id` 唯一）、`undo_log` |
 | `ai_oj_file` | `file_record` |
 | `ai_oj_ai` | `ai_session`、`ai_message`、`ai_prompt_template` |
@@ -442,7 +442,7 @@ ai-oj
 用户提交
   │  POST /api/judge/submit（submitId 由客户端 crypto.randomUUID() 生成）
   ▼
-judge_submission 落库(PENDING) ──uk_submit_id 命中──► 直接返回已有记录
+judge_submission 落库(PENDING) ──uk_user_submit 命中──► 直接返回已有记录
   │  RocketMQ：AI_OJ_JUDGE_SUBMIT
   ▼
 JudgeExecuteService 消费
@@ -459,7 +459,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 
 - **判题状态**：`0 PENDING / 1 COMPILING / 2 JUDGING` 为非终态；终态为 `3 ACCEPTED / 4 WRONG_ANSWER / 5 TLE / 6 MLE / 7 RE / 8 CE / 9 PE / 10 OLE / 11 SYSTEM_ERROR`
 - **状态机**：Spring StateMachine 工厂模式，每次消费新建实例；状态以 `judge_submission.status` 为权威存储，不做内存持久态
-- **进度通道**：WebSocket `/ws/judge` 为主，Redis `judge:progress:{submitId}` 缓存 + HTTP 轮询兜底
+- **进度通道**：WebSocket `/ws/judge` 为主，Redis `judge:progress:{userId}:{submitId}` 缓存 + HTTP 轮询兜底
 - **卡死补偿**：Quartz 集群模式（JDBC 持久化，`QRTZ_*`），`0 * * * * ?` 每分钟扫描非终态且超时的提交，重试 3 次后置 `SYSTEM_ERROR` 并广播
 - **沙箱调度**：最小负载优先（Redis Hash `judge:sandbox:load`），失败节点拉黑 30s，最多重试 3 次；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度
 
@@ -523,11 +523,12 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 
 ## 工程设计
 
-### 判题三层幂等
+### 判题幂等与防重
 
-1. **注解幂等**：`@Idempotent(key="#req.submitId")`，AOP + Redis 挡掉短时间重复请求
-2. **频率锁**：同用户对同题 `Redisson tryLock(0, 5s)`，超限返回「提交过于频繁」
-3. **数据库唯一键**：`uk_submit_id` 最终兜底，捕获 `DuplicateKeyException` 后查询已有记录原样返回
+1. **用户级幂等键**：幂等标识为 `(userId, submitId)`，提交入口先按该组合查已有记录直接返回；`submitId` 由客户端 `crypto.randomUUID()` 生成，网络重试/重复提交不会产生第二条记录，不同用户互不影响
+2. **频率锁**：同用户对同题 Redisson `tryLock(0, 5s)`，超限返回「提交过于频繁」；并发重试若首个请求已落库，则回查幂等键直接返回原记录
+3. **数据库唯一键**：`uk_user_submit(user_id, submit_id)` 最终兜底，捕获 `DuplicateKeyException` 后按同一组合回查并原样返回
+4. **结果统计幂等**：auth 侧按 `userId + submitId` 标记去重，保证重复投递的结果消息不会重复累加提交数/通过数
 
 `submitId` 由客户端生成 UUID，网络重试、双击、刷新都安全。
 

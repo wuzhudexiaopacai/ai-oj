@@ -75,6 +75,7 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
             record.setAcceptCount(record.getAcceptCount() + 1);
             // 罚时 = 首次 AC 提交时间 - 比赛开始时间（sec）；报名时间与开赛时间无关，不能作为基准
             JudgeSubmission submission = judgeSubmissionMapper.selectOne(new LambdaQueryWrapper<JudgeSubmission>()
+                    .eq(JudgeSubmission::getUserId, message.getUserId())
                     .eq(JudgeSubmission::getSubmitId, message.getSubmitId()));
             if (submission != null && submission.getCreateTime() != null) {
                 long startMillis = resolveContestStartMillis(message.getContestId(), record);

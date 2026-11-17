@@ -231,9 +231,10 @@ public class SubmissionService {
     public SubmissionDetailVO detailBySubmitId(String submitId) {
         Long userId = SecurityUtils.requireLogin().getId();
         JudgeSubmission submission = judgeSubmissionMapper.selectOne(
-                new LambdaQueryWrapper<JudgeSubmission>().eq(JudgeSubmission::getSubmitId, submitId));
+                new LambdaQueryWrapper<JudgeSubmission>()
+                        .eq(JudgeSubmission::getUserId, userId)
+                        .eq(JudgeSubmission::getSubmitId, submitId));
         Asserts.notNull(submission, "提交记录不存在");
-        Asserts.isTrue(submission.getUserId().equals(userId), "无权查看该提交");
         return detail(submission.getId());
     }
 
@@ -273,7 +274,9 @@ public class SubmissionService {
      * @return 进度
      */
     public JudgeProgressVO progress(String submitId) {
-        String cacheKey = RedisKeys.JUDGE_PROGRESS + submitId;
+        Long userId = SecurityUtils.requireLogin().getId();
+        // 缓存 key 带用户维度，避免不同用户的同名 submitId 互相读到对方进度
+        String cacheKey = RedisKeys.JUDGE_PROGRESS + userId + ":" + submitId;
         String cached = stringRedisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             try {
@@ -284,7 +287,9 @@ public class SubmissionService {
         }
 
         JudgeSubmission submission = judgeSubmissionMapper.selectOne(
-                new LambdaQueryWrapper<JudgeSubmission>().eq(JudgeSubmission::getSubmitId, submitId));
+                new LambdaQueryWrapper<JudgeSubmission>()
+                        .eq(JudgeSubmission::getUserId, userId)
+                        .eq(JudgeSubmission::getSubmitId, submitId));
         Asserts.notNull(submission, "提交记录不存在");
         return buildProgress(submission);
     }

@@ -63,9 +63,11 @@ public class JudgeDlqConsumer implements RocketMQListener<MessageExt> {
         // 解析 submitId，兜底置 SYSTEM_ERROR
         try {
             JudgeSubmitMessage submitMessage = objectMapper.readValue(body, JudgeSubmitMessage.class);
-            JudgeSubmission submission = judgeSubmissionMapper.selectOne(
-                    new LambdaQueryWrapper<JudgeSubmission>()
-                            .eq(JudgeSubmission::getSubmitId, submitMessage.getSubmitId()));
+            // 优先按提交记录主键定位；submitId 仅在同一用户内唯一，不能作为全局条件
+            JudgeSubmission submission = submitMessage.getSubmissionId() == null
+                    ? judgeSubmissionMapper.selectOne(new LambdaQueryWrapper<JudgeSubmission>()
+                            .eq(JudgeSubmission::getSubmitId, submitMessage.getSubmitId()))
+                    : judgeSubmissionMapper.selectById(submitMessage.getSubmissionId());
             if (submission != null) {
                 stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
                         "判题多次失败进入死信，已归档");

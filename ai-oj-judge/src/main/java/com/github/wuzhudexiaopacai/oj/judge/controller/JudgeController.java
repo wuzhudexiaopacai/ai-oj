@@ -41,7 +41,7 @@ public class JudgeController {
     /**
      * 提交判题
      */
-    @Operation(summary = "提交判题", description = "需登录，按当前用户落库判题。submitId 由客户端生成，用于三层幂等（注解幂等 + 用户级频率锁 + 数据库唯一键），同一 submitId 重复提交直接返回已有记录；同一用户对同一题目在默认 5 秒内再次提交会被拒绝。contestId 非 0 时校验已报名、比赛进行中且题目属于该比赛；落库初始状态为 0 排队中，同步投递 RocketMQ 判题消息后立即返回提交记录 ID，判题结果异步经 MQ/WebSocket 广播（0 排队中 → 1 编译中 → 2 评测中 → 3~11 终态）。")
+    @Operation(summary = "提交判题", description = "需登录，按当前用户落库判题。submitId 由客户端生成，幂等键为 (当前用户, submitId)：先按该组合查已有记录直接返回，插入时再以 uk_user_submit 唯一键兜底，因此网络重试/重复提交不会产生第二条记录，不同用户的 submitId 互不影响；同一用户对同一题目在默认 5 秒内再次提交（不同 submitId）会被拒绝。contestId 非 0 时校验已报名、比赛进行中且题目属于该比赛；落库初始状态为 0 排队中，同步投递 RocketMQ 判题消息后立即返回提交记录 ID，判题结果异步经 MQ/WebSocket 广播（0 排队中 → 1 编译中 → 2 评测中 → 3~11 终态）。")
     @PostMapping("/submit")
     public Result<SubmitResultVO> submit(@Valid @RequestBody JudgeSubmitRequest req) {
         return Result.ok(judgeService.submit(req));
@@ -68,7 +68,7 @@ public class JudgeController {
     /**
      * 判题进度（WebSocket 断线轮询兜底）
      */
-    @Operation(summary = "判题进度", description = "需登录，作为 WebSocket 断线后的轮询兜底。先读取 Redis 判题进度缓存（默认 TTL 3600 秒），未命中时按 submitId 查数据库并组装；finished=true 表示已进入终态（状态码 3~11），false 表示排队/编译/评测中仍需继续轮询。提交不存在时返回业务异常“提交记录不存在”。")
+    @Operation(summary = "判题进度", description = "需登录，作为 WebSocket 断线后的轮询兜底。先读取当前用户的 Redis 判题进度缓存（默认 TTL 3600 秒），未命中时按 submitId 查数据库并组装；查询强制限定当前登录用户，只能看到自己的提交。finished=true 表示已进入终态（状态码 3~11），false 表示排队/编译/评测中仍需继续轮询。提交不存在时返回业务异常“提交记录不存在”。")
     @GetMapping("/progress")
     public Result<JudgeProgressVO> progress(
             @Parameter(description = "幂等提交标识，客户端生成的 UUID", required = true,

@@ -3,7 +3,6 @@ package com.github.wuzhudexiaopacai.oj.judge.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
-import com.github.wuzhudexiaopacai.oj.common.core.annotation.Idempotent;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
@@ -71,19 +70,27 @@ public class JudgeService {
     private long submitIntervalSeconds;
 
     /**
-     * 提交判题（三层幂等：注解幂等 + 用户频率锁 + 数据库唯一键）
+     * 提交判题（用户级幂等 + 用户频率锁）
+     * <p>
+     * 幂等键为 (userId, submitId)：先按该组合查已有记录直接返回，插入时再以 uk_user_submit 兜底，
+     * 网络重试/客户端重复提交只会产生一条提交记录，且不同用户的 submitId 互不影响。
      *
      * @param req 提交请求
      * @return 提交结果
      */
-    @Idempotent(key = "#req.submitId", expire = 30)
     public SubmitResultVO submit(JudgeSubmitRequest req) {
         Long userId = SecurityUtils.requireLogin().getId();
+        // 幂等：同一用户重复提交同一 submitId，直接返回已有记录（不再重复校验比赛/重复投递消息）
+        JudgeSubmission existing = findOwnSubmission(userId, req.getSubmitId());
+        if (existing != null) {
+            return new SubmitResultVO(existing.getId());
+        }
+
         Long contestId = req.getContestId() == null ? 0L : req.getContestId();
         // 比赛提交前置校验：已报名 + 比赛进行中 + 题目属于该比赛，杜绝赛前/赛后刷分
         validateContestSubmission(contestId, req.getProblemId(), userId);
 
-        // 第二层防重：同用户对同题提交频率锁
+        // 防重：同用户对同题提交频率锁
         String lockKey = RedisKeys.JUDGE_USER_LOCK + userId + ":" + req.getProblemId();
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked;
@@ -94,6 +101,11 @@ public class JudgeService {
             throw new BizException(ResultCode.FAILED);
         }
         if (!locked) {
+            // 并发重试：首次请求可能刚落库，先按幂等键回查，避免把重试误判为「提交过于频繁」
+            JudgeSubmission duplicated = findOwnSubmission(userId, req.getSubmitId());
+            if (duplicated != null) {
+                return new SubmitResultVO(duplicated.getId());
+            }
             throw new BizException(ResultCode.CONFLICT.getCode(), "提交过于频繁");
         }
 
@@ -114,11 +126,10 @@ public class JudgeService {
         try {
             judgeSubmissionMapper.insert(submission);
         } catch (DuplicateKeyException e) {
-            // 第三层幂等：uk_submit_id 兜底，重复提交直接返回已有记录
-            JudgeSubmission existing = judgeSubmissionMapper.selectOne(
-                    new LambdaQueryWrapper<JudgeSubmission>().eq(JudgeSubmission::getSubmitId, req.getSubmitId()));
-            Asserts.notNull(existing, "提交记录不存在");
-            return new SubmitResultVO(existing.getId());
+            // 唯一键 uk_user_submit 兜底：并发重复提交时返回已落库的记录
+            JudgeSubmission duplicated = findOwnSubmission(userId, req.getSubmitId());
+            Asserts.notNull(duplicated, "提交记录不存在");
+            return new SubmitResultVO(duplicated.getId());
         }
 
         // 投递判题消息（keys=submitId 便于追踪）
@@ -133,6 +144,19 @@ public class JudgeService {
                 5000);
 
         return new SubmitResultVO(submission.getId());
+    }
+
+    /**
+     * 按用户 + 幂等提交标识查询已有提交
+     *
+     * @param userId   提交用户
+     * @param submitId 幂等提交标识
+     * @return 已有提交，不存在返回 null
+     */
+    private JudgeSubmission findOwnSubmission(Long userId, String submitId) {
+        return judgeSubmissionMapper.selectOne(new LambdaQueryWrapper<JudgeSubmission>()
+                .eq(JudgeSubmission::getUserId, userId)
+                .eq(JudgeSubmission::getSubmitId, submitId));
     }
 
     /**
