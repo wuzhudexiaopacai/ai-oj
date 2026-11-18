@@ -1,5 +1,6 @@
 //! 核心执行器：编译、单 case 运行、答案比对、SPJ
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -37,21 +38,26 @@ impl Executor {
         }
     }
 
-    /// 编译容器安全限制：断网、drop 所有 capabilities、限制进程数与内存
-    /// （不能开只读根文件系统，编译产物要写入 /work）
+    /// 编译容器安全限制：断网、drop 所有 capabilities、限制进程数与内存、
+    /// 禁止提权；根文件系统需可写（编译器会写临时文件），通过 tmpfs 限制 /tmp
     fn compile_host_config(&self) -> HostConfig {
         HostConfig {
             network_mode: Some("none".to_string()),
             memory: Some((self.config.compile_memory_mb * 1024 * 1024) as i64),
             pids_limit: Some(128),
             cap_drop: Some(vec!["ALL".to_string()]),
+            security_opt: Some(vec!["no-new-privileges=true".to_string()]),
+            tmpfs: Some(HashMap::from([(
+                "/tmp".to_string(),
+                "rw,nosuid,nodev,size=512m".to_string(),
+            )])),
             auto_remove: Some(false),
             ..Default::default()
         }
     }
 
-    /// 运行容器安全限制：只读根文件系统（唯一可写为 /work 挂载点）、
-    /// 断网、1 CPU、drop 所有 capabilities、限制进程数
+    /// 运行容器安全限制：只读根文件系统（唯一可写为 /work 挂载点与 /tmp tmpfs）、
+    /// 断网、1 CPU、drop 所有 capabilities、禁止提权、限制进程数
     fn run_host_config(&self, memory_bytes: i64) -> HostConfig {
         HostConfig {
             network_mode: Some("none".to_string()),
@@ -59,7 +65,12 @@ impl Executor {
             nano_cpus: Some(1_000_000_000),
             pids_limit: Some(64),
             cap_drop: Some(vec!["ALL".to_string()]),
+            security_opt: Some(vec!["no-new-privileges=true".to_string()]),
             readonly_rootfs: Some(true),
+            tmpfs: Some(HashMap::from([(
+                "/tmp".to_string(),
+                "rw,nosuid,nodev,size=64m".to_string(),
+            )])),
             auto_remove: Some(false),
             ..Default::default()
         }
@@ -68,6 +79,7 @@ impl Executor {
     fn task_dir(&self, task_id: &str) -> String {
         format!("{}/{}", self.config.work_dir, task_id)
     }
+
 
     /// 编译阶段：返回编译结果；解释型语言（无 compile_cmd）直接成功
     async fn compile(
@@ -236,8 +248,8 @@ impl Executor {
     ) -> Result<CompileInfo, SandboxError> {
         let lang = registry.get(&spj.language)?;
         let spj_dir = format!("{}/spj", self.task_dir(task_id));
-        fs::create_dir_all(&spj_dir).await?;
-        fs::write(format!("{spj_dir}/{}", lang.source_file), &spj.code).await?;
+        ensure_shared_dir(&spj_dir).await?;
+        write_shared_file(&format!("{spj_dir}/{}", lang.source_file), spj.code.as_bytes()).await?;
         match &lang.compile_cmd {
             Some(cmd) => {
                 let result = self
@@ -342,9 +354,9 @@ impl Executor {
             });
         }
         let task_dir = self.task_dir(task_id);
-        fs::create_dir_all(&task_dir).await?;
+        ensure_shared_dir(&task_dir).await?;
         let lang = registry.get(&req.language)?;
-        fs::write(format!("{task_dir}/{}", lang.source_file), &req.code).await?;
+        write_shared_file(&format!("{task_dir}/{}", lang.source_file), req.code.as_bytes()).await?;
 
         // 1. 编译用户代码
         let compile_name = self.docker.container_name(task_id, "compile");
@@ -410,11 +422,15 @@ impl Executor {
         // 3. 逐 case 运行并判定
         let mut results = Vec::with_capacity(req.cases.len());
         for case in &req.cases {
-            fs::write(format!("{task_dir}/case_{}.in", case.seq), &case.input).await?;
+            write_shared_file(
+                &format!("{task_dir}/case_{}.in", case.seq),
+                case.input.as_bytes(),
+            )
+            .await?;
             if req.spj.is_some() {
-                fs::write(
-                    format!("{task_dir}/case_{}.expected", case.seq),
-                    &case.expected_output,
+                write_shared_file(
+                    &format!("{task_dir}/case_{}.expected", case.seq),
+                    case.expected_output.as_bytes(),
                 )
                 .await?;
             }
@@ -499,9 +515,13 @@ impl Executor {
         let mut containers: Vec<String> = Vec::new();
 
         let result = async {
-            fs::create_dir_all(&task_dir).await?;
-            fs::write(format!("{task_dir}/{}", lang.source_file), &req.code).await?;
-            fs::write(format!("{task_dir}/case_0.in"), &req.stdin).await?;
+            ensure_shared_dir(&task_dir).await?;
+            write_shared_file(
+                &format!("{task_dir}/{}", lang.source_file),
+                req.code.as_bytes(),
+            )
+            .await?;
+            write_shared_file(&format!("{task_dir}/case_0.in"), req.stdin.as_bytes()).await?;
 
             // 编译阶段
             let compile_name = self.docker.container_name(&task_id, "compile");
@@ -552,6 +572,32 @@ impl Executor {
         });
         result
     }
+}
+
+/// 创建任务目录并放开写权限：子容器以 nobody(65534) 运行，需要写入编译产物与输出
+async fn ensure_shared_dir(path: &str) -> Result<(), SandboxError> {
+    fs::create_dir_all(path).await?;
+    set_mode(path, 0o777).await
+}
+
+/// 写入任务文件并放开读写权限，保证子容器内的 nobody 用户可以读取/覆盖
+async fn write_shared_file(path: &str, content: &[u8]) -> Result<(), SandboxError> {
+    fs::write(path, content).await?;
+    set_mode(path, 0o666).await
+}
+
+/// 设置 POSIX 权限位；非 Unix 平台（本地单测）忽略
+async fn set_mode(path: &str, mode: u32) -> Result<(), SandboxError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+    }
+    Ok(())
 }
 
 /// 限制读取文件内容：超过 limit 截断并标记 exceeded；文件不存在视为空
@@ -794,6 +840,27 @@ mod tests {
         assert_eq!(spj_status(false, 137), Status::SystemError);
         assert_eq!(spj_status(false, 139), Status::SystemError);
         assert_eq!(spj_status(false, 143), Status::SystemError);
+    }
+
+    #[tokio::test]
+    async fn shared_task_files_should_allow_nobody_write() {
+        let dir = std::env::temp_dir().join(format!("sandbox-perm-{}", Uuid::new_v4()));
+        let dir_path = dir.to_str().unwrap().to_string();
+        ensure_shared_dir(&dir_path).await.unwrap();
+        let file_path = format!("{dir_path}/main.c");
+        write_shared_file(&file_path, b"int main() { return 0; }")
+            .await
+            .unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir_mode = std::fs::metadata(&dir_path).unwrap().permissions().mode();
+            let file_mode = std::fs::metadata(&file_path).unwrap().permissions().mode();
+            assert_eq!(dir_mode & 0o777, 0o777);
+            assert_eq!(file_mode & 0o777, 0o666);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn judge_case(seq: u32) -> JudgeCase {

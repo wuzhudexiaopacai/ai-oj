@@ -23,6 +23,9 @@ use tracing::{info, warn};
 use crate::config::AppConfig;
 use crate::error::SandboxError;
 
+/// 子容器运行用户：nobody(65534)，避免以 root 执行不可信代码
+const SANDBOX_USER: &str = "65534:65534";
+
 /// 一次容器执行的完整结果
 pub struct ContainerResult {
     /// 容器退出码（兜底超时强杀时为 -1）
@@ -112,6 +115,12 @@ impl DockerManager {
             image: Some(image.to_string()),
             cmd: Some(cmd),
             working_dir: Some(container_workdir.to_string()),
+            // 统一以 nobody 运行，HOME/TMPDIR 指向可写的 tmpfs
+            user: Some(SANDBOX_USER.to_string()),
+            env: Some(vec![
+                "HOME=/tmp".to_string(),
+                "TMPDIR=/tmp".to_string(),
+            ]),
             attach_stdout: Some(true),
             attach_stderr: Some(true),
             host_config: Some(hc),
