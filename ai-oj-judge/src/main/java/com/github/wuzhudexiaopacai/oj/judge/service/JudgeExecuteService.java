@@ -1,6 +1,7 @@
 package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.JudgeCaseDTO;
@@ -14,9 +15,11 @@ import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeCaseResult;
+import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeOutbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeOutboxMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mq.JudgeSubmitMessage;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
@@ -41,6 +44,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -69,6 +73,8 @@ public class JudgeExecuteService {
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
     private final JudgeCaseResultMapper judgeCaseResultMapper;
+
+    private final JudgeOutboxMapper judgeOutboxMapper;
 
     private final SandboxRegistry sandboxRegistry;
 
@@ -350,11 +356,12 @@ public class JudgeExecuteService {
                 .memoryUsed(submission.getMemoryUsed())
                 .judgeTime(submission.getJudgeTime())
                 .build();
-        rocketMQTemplate.syncSend(MqConstants.JUDGE_RESULT_TOPIC,
-                MessageBuilder.withPayload(resultMessage)
-                        .setHeader(RocketMQHeaders.KEYS, submission.getSubmitId())
-                        .build(),
-                5000);
+        // 1. 结果消息先落本地消息表（Outbox），再尝试投递：
+        //    投递失败保留待投递状态，由 ResultOutboxResendJob 退避补投，避免结果永久丢失
+        JudgeOutbox outbox = saveOutbox(submission, resultMessage);
+        if (outbox == null || !Integer.valueOf(JudgeOutbox.STATUS_SENT).equals(outbox.getStatus())) {
+            deliverResult(outbox, resultMessage);
+        }
 
         // 2. Redis 进度缓存（轮询兜底）
         JudgeProgressVO progress = SubmissionService.buildProgress(submission);
@@ -369,6 +376,59 @@ public class JudgeExecuteService {
         // 3. WebSocket 推送（本机 + 跨实例）
         judgeWsPushService.push(progress);
         log.info("提交 {} 结果已广播 status={}", submission.getSubmitId(), status);
+    }
+
+    /**
+     * 结果消息落本地消息表；已存在（重复广播）时直接复用原记录
+     *
+     * @return Outbox 记录，落库失败返回 null（调用方退化为直接投递）
+     */
+    private JudgeOutbox saveOutbox(JudgeSubmission submission, JudgeResultMessage resultMessage) {
+        try {
+            JudgeOutbox existing = judgeOutboxMapper.selectOne(new LambdaQueryWrapper<JudgeOutbox>()
+                    .eq(JudgeOutbox::getSubmitId, submission.getSubmitId())
+                    .last("limit 1"));
+            if (existing != null) {
+                return existing;
+            }
+            JudgeOutbox outbox = new JudgeOutbox();
+            outbox.setSubmitId(submission.getSubmitId());
+            outbox.setPayload(objectMapper.writeValueAsString(resultMessage));
+            outbox.setStatus(JudgeOutbox.STATUS_PENDING);
+            outbox.setRetryCount(0);
+            outbox.setNextRetryTime(LocalDateTime.now());
+            judgeOutboxMapper.insert(outbox);
+            return outbox;
+        } catch (Exception e) {
+            log.error("结果消息落本地消息表失败，退化为直接投递 submitId={}", submission.getSubmitId(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 投递结果消息；成功后标记 Outbox 已投递，失败则保留待投递由补偿任务重试
+     */
+    private void deliverResult(JudgeOutbox outbox, JudgeResultMessage resultMessage) {
+        try {
+            rocketMQTemplate.syncSend(MqConstants.JUDGE_RESULT_TOPIC,
+                    MessageBuilder.withPayload(resultMessage)
+                            .setHeader(RocketMQHeaders.KEYS, resultMessage.getSubmitId())
+                            .build(),
+                    5000);
+        } catch (Exception e) {
+            log.warn("结果消息投递失败，等待补偿任务补投 submitId={}", resultMessage.getSubmitId(), e);
+            return;
+        }
+        if (outbox == null) {
+            return;
+        }
+        try {
+            outbox.setStatus(JudgeOutbox.STATUS_SENT);
+            judgeOutboxMapper.updateById(outbox);
+        } catch (Exception e) {
+            // 消息已发出但状态未更新：补偿任务会重复投递一次，下游按 submitId 幂等
+            log.warn("结果消息已投递但 Outbox 状态更新失败 submitId={}", resultMessage.getSubmitId(), e);
+        }
     }
 
     /**

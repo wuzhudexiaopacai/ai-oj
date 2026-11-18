@@ -9,6 +9,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeOutboxMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
@@ -56,6 +57,9 @@ class JudgeExecuteServiceTest {
 
     @Mock
     private JudgeCaseResultMapper judgeCaseResultMapper;
+
+    @Mock
+    private JudgeOutboxMapper judgeOutboxMapper;
 
     @Mock
     private SandboxRegistry sandboxRegistry;

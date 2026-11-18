@@ -88,6 +88,27 @@ INSERT INTO judge_sandbox (id, sandbox_key, base_url, max_parallel, status) VALU
 (1, 'sandbox-local-1', 'http://ai-oj-sandbox:8000', 4, 1);
 
 -- -----------------------------
+-- 判题结果本地消息表（Outbox）：终态结果先落库再投递，失败由补偿任务按退避重投
+-- -----------------------------
+DROP TABLE IF EXISTS judge_outbox;
+CREATE TABLE judge_outbox (
+    id              BIGINT       NOT NULL,
+    submit_id       VARCHAR(64)  NOT NULL COMMENT '提交业务 ID（幂等键）',
+    payload         TEXT         NOT NULL COMMENT '待投递的结果消息 JSON',
+    status          TINYINT      NOT NULL DEFAULT 0 COMMENT '0待投递 1已投递',
+    retry_count     INT          NOT NULL DEFAULT 0 COMMENT '已重试次数',
+    next_retry_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次重试时间（退避）',
+    create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    create_by       BIGINT       NULL,
+    update_by       BIGINT       NULL,
+    deleted         TINYINT      NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_submit_id (submit_id),
+    KEY idx_status_retry (status, next_retry_time)
+) ENGINE = InnoDB COMMENT '判题结果本地消息表';
+
+-- -----------------------------
 -- 比赛成绩记录（归属判题库：判题结果消费更新；报名时由比赛服务经 Seata 全局事务初始化）
 -- -----------------------------
 DROP TABLE IF EXISTS contest_record;

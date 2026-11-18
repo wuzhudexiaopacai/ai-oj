@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.judge.config;
 
+import com.github.wuzhudexiaopacai.oj.judge.job.ResultOutboxResendJob;
 import com.github.wuzhudexiaopacai.oj.judge.job.StuckSubmissionScanJob;
 import org.quartz.CronScheduleBuilder;
 import org.quartz.JobBuilder;
@@ -22,6 +23,9 @@ public class QuartzConfig {
     @Value("${ai-oj.judge.stuck-scan-cron:0 * * * * ?}")
     private String stuckScanCron;
 
+    @Value("${ai-oj.judge.outbox-resend-cron:0/20 * * * * ?}")
+    private String outboxResendCron;
+
     /**
      * 卡死提交扫描 JobDetail（durability：无触发器时也保留定义）
      */
@@ -42,6 +46,29 @@ public class QuartzConfig {
                 .forJob(stuckSubmissionScanJobDetail)
                 .withIdentity("stuckSubmissionScanTrigger", "judge")
                 .withSchedule(CronScheduleBuilder.cronSchedule(stuckScanCron))
+                .build();
+    }
+
+    /**
+     * 结果 Outbox 补投 JobDetail
+     */
+    @Bean
+    public JobDetail resultOutboxResendJobDetail() {
+        return JobBuilder.newJob(ResultOutboxResendJob.class)
+                .withIdentity("resultOutboxResendJob", "judge")
+                .storeDurably()
+                .build();
+    }
+
+    /**
+     * 结果 Outbox 补投 CronTrigger（默认每 20 秒扫一次待投递记录）
+     */
+    @Bean
+    public Trigger resultOutboxResendTrigger(JobDetail resultOutboxResendJobDetail) {
+        return TriggerBuilder.newTrigger()
+                .forJob(resultOutboxResendJobDetail)
+                .withIdentity("resultOutboxResendTrigger", "judge")
+                .withSchedule(CronScheduleBuilder.cronSchedule(outboxResendCron))
                 .build();
     }
 }

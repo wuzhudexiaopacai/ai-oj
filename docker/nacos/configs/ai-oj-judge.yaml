@@ -47,6 +47,8 @@ ai-oj:
     supported-languages: c,cpp,java,python3,go,javascript,rust
     # 卡死任务扫描（Quartz Cron）：每分钟扫描超时仍未完成的提交
     stuck-scan-cron: "0 * * * * ?"
+    # 判题结果 Outbox 补投（Quartz Cron）：默认每 20 秒扫描投递失败的待投递记录
+    outbox-resend-cron: "0/20 * * * * ?"
     # 判题超时阈值（秒），超过视为沙箱异常
     judge-timeout-seconds: 120
     # 沙箱访问令牌（与沙箱 SANDBOX_API_TOKEN 保持一致），为空表示沙箱未开启校验
