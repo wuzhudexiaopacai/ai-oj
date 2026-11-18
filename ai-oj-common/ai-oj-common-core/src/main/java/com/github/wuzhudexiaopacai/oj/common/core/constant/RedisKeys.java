@@ -62,9 +62,9 @@ public class RedisKeys {
     public static final String JUDGE_PROGRESS = "judge:progress:";
 
     /**
-     * 沙箱负载 Hash：field=sandboxId, value=当前并行任务数
+     * 沙箱负载计数：+ sandboxKey，value=当前并行任务数（带 TTL，进程崩溃后可自动归零）
      */
-    public static final String SANDBOX_LOAD = "judge:sandbox:load";
+    public static final String SANDBOX_LOAD = "judge:sandbox:load:";
 
     /**
      * 比赛排行榜快照：+ contestId
