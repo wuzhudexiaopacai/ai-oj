@@ -130,6 +130,9 @@ impl Executor {
         let timeout = timeout_arg(limit_ms);
         // 栈空间限制（KB）：ulimit 不受支持时忽略，不影响判题
         let stack_kb = stack_limit_mb * 1024;
+        // 单文件写入上限（512 字节块）：防止死循环程序把磁盘写满，
+        // 与输出读取上限保持同一口径，超出后进程被 SIGXFSZ 终止（退出码 153）
+        let file_blocks = file_size_blocks(self.config.output_limit_bytes);
         // 容器内存上限（含语言补偿），同时作为 -Xmx 等运行参数的模板取值
         let mem_bytes = (memory_limit_mb as f64 * lang.memory_factor * 1024.0 * 1024.0) as i64;
         let limit_kb = (mem_bytes / 1024) as u64;
@@ -142,6 +145,7 @@ impl Executor {
         // 短时间运行的程序无法被 Docker stats 秒级采样捕获，cgroup 峰值是准确的兜底来源。
         let shell_cmd = format!(
             "ulimit -s {stack_kb} 2>/dev/null; \
+             ulimit -f {file_blocks} 2>/dev/null; \
              start_ns=$(date +%s%N 2>/dev/null); \
              timeout {timeout} {run_cmd} < case_{seq}.in > case_{seq}.out 2> case_{seq}.err; rc=$?; \
              end_ns=$(date +%s%N 2>/dev/null); \
@@ -188,18 +192,9 @@ impl Executor {
             limit_ms,
         );
 
-        // 判题状态流转：兜底超时/退出码 124 -> TLE；137 -> MLE；其他非 0 -> RE；0 -> 视输出/内存再定
-        let mut status = if result.timed_out || result.exit_code == 124 {
-            Status::TimeLimitExceeded
-        } else if result.exit_code == 137 {
-            // 137 = 128 + SIGKILL：容器内存超限时内核 OOM Killer 以 SIGKILL 强杀进程，
-            // 该场景必须上报 MLE，否则内存限制会被误判成运行错误
-            Status::MemoryLimitExceeded
-        } else if result.exit_code != 0 {
-            Status::RuntimeError
-        } else {
-            Status::Accepted
-        };
+        // 判题状态流转：兜底超时/退出码 124 -> TLE；137 -> MLE；
+        // 153(128+SIGXFSZ) -> OLE（超出 ulimit -f 单文件写入上限）；其他非 0 -> RE
+        let mut status = classify_run_exit(result.timed_out, result.exit_code);
 
         // 无论成败都尽量读回输出（/run 场景需要展示部分输出）；限制读取上限防 OLE 撑爆内存
         let out_path = format!("{task_dir}/case_{seq}.out");
@@ -640,6 +635,30 @@ fn compare_output(expected: &str, actual: &str) -> Status {
     }
 }
 
+/// 运行退出码 -> 判题状态：
+/// - 兜底超时 / 124(TIMEOUT)：TLE
+/// - 137(128+SIGKILL)：容器内存超限被 OOM Killer 强杀，必须上报 MLE 而非 RE
+/// - 153(128+SIGXFSZ)：写文件超过 ulimit -f 上限，上报 OLE
+/// - 其余非 0：RE
+fn classify_run_exit(timed_out: bool, exit_code: i64) -> Status {
+    if timed_out || exit_code == 124 {
+        Status::TimeLimitExceeded
+    } else if exit_code == 137 {
+        Status::MemoryLimitExceeded
+    } else if exit_code == 153 {
+        Status::OutputLimitExceeded
+    } else if exit_code != 0 {
+        Status::RuntimeError
+    } else {
+        Status::Accepted
+    }
+}
+
+/// 字节上限换算为 ulimit -f 的 512 字节块数，至少 1 块（0 表示不限制）
+fn file_size_blocks(limit_bytes: u64) -> u64 {
+    ((limit_bytes + 511) / 512).max(1)
+}
+
 /// 毫秒级 timeout 参数：GNU coreutils / 现代 BusyBox 的 timeout 均支持小数秒
 fn timeout_arg(limit_ms: u64) -> String {
     format!("{:.3}", limit_ms.max(1) as f64 / 1000.0)
@@ -812,6 +831,26 @@ mod tests {
     #[test]
     fn compare_output_should_reject_different_tokens() {
         assert_eq!(compare_output("1 2", "12"), Status::WrongAnswer);
+    }
+
+    #[test]
+    fn classify_run_exit_should_map_signal_codes() {
+        assert_eq!(classify_run_exit(false, 0), Status::Accepted);
+        assert_eq!(classify_run_exit(true, -1), Status::TimeLimitExceeded);
+        assert_eq!(classify_run_exit(false, 124), Status::TimeLimitExceeded);
+        assert_eq!(classify_run_exit(false, 137), Status::MemoryLimitExceeded);
+        assert_eq!(classify_run_exit(false, 153), Status::OutputLimitExceeded);
+        assert_eq!(classify_run_exit(false, 1), Status::RuntimeError);
+        assert_eq!(classify_run_exit(false, 139), Status::RuntimeError);
+    }
+
+    #[test]
+    fn file_size_blocks_should_round_up_and_never_be_zero() {
+        assert_eq!(file_size_blocks(0), 1);
+        assert_eq!(file_size_blocks(1), 1);
+        assert_eq!(file_size_blocks(512), 1);
+        assert_eq!(file_size_blocks(513), 2);
+        assert_eq!(file_size_blocks(16 * 1024 * 1024), 32768);
     }
 
     #[test]
