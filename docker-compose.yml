@@ -5,6 +5,10 @@
 networks:
   ai-oj-net:
     driver: bridge
+  # 沙箱与 docker-socket-proxy 专用网络：internal 禁止访问外网，缩小 socket 代理暴露面
+  ai-oj-sandbox-net:
+    driver: bridge
+    internal: true
 
 volumes:
   mysql-data:
@@ -21,6 +25,8 @@ x-app-env: &app-env
   NACOS_ADDR: nacos:8848
   SPRING_CLOUD_NACOS_USERNAME: nacos
   SPRING_CLOUD_NACOS_PASSWORD: nacos
+  # 沙箱访问令牌（judge -> sandbox），空值表示不校验，生产环境必须注入
+  SANDBOX_API_TOKEN: ${SANDBOX_API_TOKEN:-}
   # 容器默认 UTC 会让 LocalDateTime.now()/自动时间字段与比赛时间（东八区墙钟）错位 8 小时
   TZ: Asia/Shanghai
 
@@ -234,22 +240,47 @@ services:
     restart: unless-stopped
 
   # ======================== 评测沙箱（Rust） ========================
+  # Docker socket 代理：沙箱不再直接挂载 /var/run/docker.sock（等价宿主 root），
+  # 只允许容器相关接口的读写，镜像/卷/网络/exec 等危险接口全部拒绝
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: ai-oj-docker-proxy
+    environment:
+      CONTAINERS: "1"
+      # 允许 POST（创建/启动/强杀容器），DELETE 也在该开关下放行
+      POST: "1"
+      IMAGES: "0"
+      VOLUMES: "0"
+      NETWORKS: "0"
+      EXEC: "0"
+      INFO: "0"
+      SYSTEM: "0"
+      LOG_LEVEL: "warning"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - ai-oj-sandbox-net
+    restart: unless-stopped
+
   ai-oj-sandbox:
     build: ./ai-oj-sandbox
     container_name: ai-oj-sandbox
+    depends_on:
+      - docker-socket-proxy
     environment:
       SANDBOX_LISTEN: 0.0.0.0:8000
       SANDBOX_MAX_PARALLEL: "4"
       SANDBOX_WORK_DIR: /work
       SANDBOX_WORK_VOLUME: ai-oj_ai-oj-work
-    ports:
-      - "8000:8000"
+      SANDBOX_DOCKER_HOST: tcp://docker-socket-proxy:2375
+      # 与判题服务共享的访问令牌（生产环境务必通过宿主机 .env 注入非空值）
+      SANDBOX_API_TOKEN: ${SANDBOX_API_TOKEN:-}
+    # 不发布端口：仅 ai-oj-net 内的 judge 可通过容器名 ai-oj-sandbox:8000 访问
     volumes:
-      # Windows Docker Desktop (WSL2) 下该 socket 同样可用
-      - /var/run/docker.sock:/var/run/docker.sock
       - ai-oj-work:/work
     networks:
       - ai-oj-net
+      - ai-oj-sandbox-net
     restart: unless-stopped
 
   # ======================== 微服务层 ========================

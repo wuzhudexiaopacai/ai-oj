@@ -8,6 +8,11 @@ work_dir = "/work"
 work_volume = "ai-oj-work"
 # 子容器名称前缀，用于启动时清理残留
 container_prefix = "ai-oj-sandbox-"
+# Docker 守护进程地址。compose 部署时指向 docker-socket-proxy，
+# 避免把宿主 socket 直接暴露给沙箱；本地单机调试可用 unix:///var/run/docker.sock
+docker_host = "unix:///var/run/docker.sock"
+# HTTP 访问令牌（请求头 X-Sandbox-Token）。为空不校验，生产环境必须通过 SANDBOX_API_TOKEN 注入
+api_token = ""
 # 默认时间/内存限制
 default_time_limit_ms = 2000
 default_memory_limit_mb = 256

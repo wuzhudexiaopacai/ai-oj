@@ -1,5 +1,9 @@
 use serde::Deserialize;
 
+fn default_docker_host() -> String {
+    "unix:///var/run/docker.sock".to_string()
+}
+
 /// 服务配置，从 config.toml 加载
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -9,6 +13,12 @@ pub struct AppConfig {
     pub work_dir: String,
     pub work_volume: String,
     pub container_prefix: String,
+    /// Docker 守护进程地址：unix:///var/run/docker.sock 或 tcp://docker-socket-proxy:2375
+    #[serde(default = "default_docker_host")]
+    pub docker_host: String,
+    /// HTTP 访问令牌；为空表示不校验（仅允许内网部署时使用）
+    #[serde(default)]
+    pub api_token: Option<String>,
     pub default_time_limit_ms: u64,
     pub default_memory_limit_mb: u64,
     pub compile_timeout_secs: u64,
@@ -27,6 +37,8 @@ impl AppConfig {
         let mut config: Self = toml::from_str(&content)
             .map_err(|e| crate::error::SandboxError::Config(format!("解析 {path} 失败: {e}")))?;
         config.apply_env();
+        // 空字符串等价于未配置，避免误开启"空令牌"校验
+        config.api_token = config.api_token.filter(|token| !token.is_empty());
         Ok(config)
     }
 
@@ -46,6 +58,12 @@ impl AppConfig {
         }
         if let Some(v) = env("SANDBOX_CONTAINER_PREFIX") {
             self.container_prefix = v;
+        }
+        if let Some(v) = env("SANDBOX_DOCKER_HOST") {
+            self.docker_host = v;
+        }
+        if let Some(v) = env("SANDBOX_API_TOKEN") {
+            self.api_token = Some(v);
         }
         if let Some(v) = env("SANDBOX_MAX_PARALLEL").and_then(|v| v.parse().ok()) {
             self.max_parallel = v;

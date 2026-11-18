@@ -1,5 +1,6 @@
 package com.github.wuzhudexiaopacai.oj.judge.sandbox;
 
+import cn.hutool.core.util.StrUtil;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeRequest;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeResponse;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunRequest;
@@ -22,8 +23,19 @@ import java.time.Duration;
 @Component
 public class SandboxClient {
 
+    /**
+     * 沙箱访问令牌请求头
+     */
+    private static final String TOKEN_HEADER = "X-Sandbox-Token";
+
     @Value("${ai-oj.judge.judge-timeout-seconds:120}")
     private long judgeTimeoutSeconds;
+
+    /**
+     * 沙箱访问令牌（与沙箱 SANDBOX_API_TOKEN 一致），为空表示沙箱未开启校验
+     */
+    @Value("${ai-oj.judge.sandbox-token:}")
+    private String sandboxToken;
 
     private final WebClient webClient = WebClient.builder().build();
 
@@ -35,10 +47,10 @@ public class SandboxClient {
      * @return 判题响应
      */
     public SandboxJudgeResponse judge(String baseUrl, SandboxJudgeRequest request) {
-        return webClient.post()
+        return withToken(webClient.post()
                 .uri(baseUrl + "/judge")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(request)
+                .bodyValue(request))
                 .retrieve()
                 .bodyToMono(SandboxJudgeResponse.class)
                 .timeout(Duration.ofSeconds(judgeTimeoutSeconds))
@@ -53,13 +65,20 @@ public class SandboxClient {
      * @return 运行响应
      */
     public SandboxRunResponse run(String baseUrl, SandboxRunRequest request) {
-        return webClient.post()
+        return withToken(webClient.post()
                 .uri(baseUrl + "/run")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(request)
+                .bodyValue(request))
                 .retrieve()
                 .bodyToMono(SandboxRunResponse.class)
                 .timeout(Duration.ofSeconds(judgeTimeoutSeconds))
                 .block();
+    }
+
+    /**
+     * 令牌非空时附加访问令牌请求头
+     */
+    private WebClient.RequestHeadersSpec<?> withToken(WebClient.RequestHeadersSpec<?> spec) {
+        return StrUtil.isBlank(sandboxToken) ? spec : spec.header(TOKEN_HEADER, sandboxToken);
     }
 }

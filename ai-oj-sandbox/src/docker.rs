@@ -15,6 +15,7 @@ use bollard::container::{
 };
 use bollard::models::{HostConfig, Mount, MountTypeEnum};
 use bollard::Docker;
+use bollard::API_DEFAULT_VERSION;
 use futures_util::StreamExt;
 use tracing::{info, warn};
 
@@ -43,7 +44,15 @@ pub struct DockerManager {
 
 impl DockerManager {
     pub fn connect(config: &AppConfig) -> Result<Self, SandboxError> {
-        let docker = Docker::connect_with_socket_defaults()?;
+        // 支持两种守护进程地址：
+        // - unix:///var/run/docker.sock：直接挂载 socket（仅限本地调试）
+        // - tcp://docker-socket-proxy:2375：经代理访问，只放行容器相关接口
+        let host = config.docker_host.trim();
+        let docker = if host.starts_with("tcp://") || host.starts_with("http://") {
+            Docker::connect_with_http(host, 120, API_DEFAULT_VERSION)?
+        } else {
+            Docker::connect_with_socket(host, 120, API_DEFAULT_VERSION)?
+        };
         Ok(Self {
             docker,
             work_volume: config.work_volume.clone(),

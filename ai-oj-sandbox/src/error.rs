@@ -12,6 +12,8 @@ pub enum SandboxError {
     Config(String),
     #[error("不支持的语言: {0}")]
     UnsupportedLanguage(String),
+    #[error("未授权：访问令牌缺失或不匹配")]
+    Unauthorized,
     #[error("Docker 调用失败: {0}")]
     Docker(#[from] bollard::errors::Error),
     #[error("IO 错误: {0}")]
@@ -22,9 +24,10 @@ pub enum SandboxError {
 
 impl IntoResponse for SandboxError {
     fn into_response(self) -> Response {
-        // 参数类错误返回 400，其余返回 500
+        // 参数类错误返回 400，未授权返回 401，其余返回 500
         let code = match &self {
             SandboxError::UnsupportedLanguage(_) => StatusCode::BAD_REQUEST,
+            SandboxError::Unauthorized => StatusCode::UNAUTHORIZED,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         tracing::error!(error = %self, "请求处理失败");

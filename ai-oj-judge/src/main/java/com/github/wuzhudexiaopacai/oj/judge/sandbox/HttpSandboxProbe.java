@@ -1,6 +1,8 @@
 package com.github.wuzhudexiaopacai.oj.judge.sandbox;
 
+import cn.hutool.core.util.StrUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -18,6 +20,17 @@ public class HttpSandboxProbe implements SandboxProbe {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
 
+    /**
+     * 沙箱访问令牌请求头
+     */
+    private static final String TOKEN_HEADER = "X-Sandbox-Token";
+
+    /**
+     * 沙箱访问令牌，为空表示沙箱未开启校验
+     */
+    @Value("${ai-oj.judge.sandbox-token:}")
+    private String sandboxToken;
+
     private final WebClient webClient = WebClient.builder().build();
 
     @Override
@@ -26,9 +39,12 @@ public class HttpSandboxProbe implements SandboxProbe {
             return false;
         }
         try {
-            String body = webClient.get()
-                    .uri(stripTrailingSlash(baseUrl) + "/health")
-                    .retrieve()
+            WebClient.RequestHeadersSpec<?> spec = webClient.get()
+                    .uri(stripTrailingSlash(baseUrl) + "/health");
+            if (StrUtil.isNotBlank(sandboxToken)) {
+                spec = spec.header(TOKEN_HEADER, sandboxToken);
+            }
+            String body = spec.retrieve()
                     .bodyToMono(String.class)
                     .timeout(TIMEOUT)
                     .block();

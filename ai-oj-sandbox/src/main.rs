@@ -46,6 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         registry,
         executor,
         semaphore: Semaphore::new(config.max_parallel),
+        api_token: config.api_token.clone(),
     });
 
     let app = Router::new()
