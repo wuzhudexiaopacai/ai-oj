@@ -25,6 +25,11 @@ x-app-env: &app-env
   NACOS_ADDR: nacos:8848
   SPRING_CLOUD_NACOS_USERNAME: nacos
   SPRING_CLOUD_NACOS_PASSWORD: nacos
+  # 中间件凭据：默认值与 compose 中间件保持一致，生产环境通过宿主机 .env 覆盖
+  MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123456}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
   # 沙箱访问令牌（judge -> sandbox），空值表示不校验，生产环境必须注入
   SANDBOX_API_TOKEN: ${SANDBOX_API_TOKEN:-}
   # 容器默认 UTC 会让 LocalDateTime.now()/自动时间字段与比赛时间（东八区墙钟）错位 8 小时
@@ -32,11 +37,13 @@ x-app-env: &app-env
 
 services:
   # ======================== 中间件层 ========================
+  # 说明：中间件端口只绑定宿主机 127.0.0.1，避免把数据库/缓存/控制台暴露到局域网；
+  # 容器间通信走 ai-oj-net，不受影响。需要远程访问时请自行改绑或用 SSH 隧道。
   mysql:
     image: mysql:8.0.40
     container_name: ai-oj-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
       TZ: Asia/Shanghai
     command:
       - --character-set-server=utf8mb4
@@ -44,7 +51,7 @@ services:
       - --default-time-zone=+08:00
       - --lower_case_table_names=1
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
@@ -55,9 +62,10 @@ services:
   redis:
     image: redis:7.4-alpine
     container_name: ai-oj-redis
-    command: redis-server --appendonly yes
+    # 强制密码：开发默认 redis123456，生产通过 REDIS_PASSWORD 覆盖（Nacos 配置同步读取该变量）
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis123456}"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -80,8 +88,8 @@ services:
       JVM_XMS: 256m
       JVM_XMX: 256m
     ports:
-      - "8848:8848"
-      - "9848:9848"
+      - "127.0.0.1:8848:8848"
+      - "127.0.0.1:9848:9848"
     volumes:
       - nacos-data:/home/nacos/data
     networks:
@@ -93,7 +101,7 @@ services:
     container_name: ai-oj-rocketmq-namesrv
     command: sh mqnamesrv
     ports:
-      - "9876:9876"
+      - "127.0.0.1:9876:9876"
     volumes:
       - rocketmq-data:/home/rocketmq/logs
     networks:
@@ -107,9 +115,9 @@ services:
     depends_on:
       - rocketmq-namesrv
     ports:
-      - "10909:10909"
-      - "10911:10911"
-      - "10912:10912"
+      - "127.0.0.1:10909:10909"
+      - "127.0.0.1:10911:10911"
+      - "127.0.0.1:10912:10912"
     volumes:
       - rocketmq-data:/home/rocketmq/logs
       - ./docker/rocketmq/broker.conf:/home/rocketmq/conf/broker.conf:ro
@@ -128,7 +136,7 @@ services:
       JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876 -Xms256m -Xmx256m"
     ports:
       # 镜像内 Dashboard 默认监听 8082
-      - "18080:8082"
+      - "127.0.0.1:18080:8082"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -138,11 +146,11 @@ services:
     container_name: ai-oj-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
     networks:
@@ -154,6 +162,10 @@ services:
     container_name: ai-oj-minio-init
     depends_on:
       - minio
+    environment:
+      # 与 minio 服务使用同一组凭据创建业务桶
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     volumes:
       - ./docker/minio/init-bucket.sh:/init-bucket.sh:ro
     entrypoint: ["sh", "/init-bucket.sh"]
@@ -169,8 +181,8 @@ services:
     environment:
       SEATA_PORT: "8091"
     ports:
-      - "8091:8091"
-      - "7091:7091"
+      - "127.0.0.1:8091:8091"
+      - "127.0.0.1:7091:7091"
     volumes:
       - ./docker/seata/application.yml:/seata-server/resources/application.yml:ro
     networks:
@@ -181,7 +193,7 @@ services:
     image: bladex/sentinel-dashboard:1.8.8
     container_name: ai-oj-sentinel
     ports:
-      - "8858:8858"
+      - "127.0.0.1:8858:8858"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -191,10 +203,11 @@ services:
     container_name: ai-oj-es
     environment:
       discovery.type: single-node
+      # 仅本机绑定，开发环境不启用 xpack 安全认证；生产部署需开启并同步 filebeat/kibana 凭据
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: -Xms256m -Xmx256m
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
@@ -234,7 +247,7 @@ services:
       # 限制 Node 堆，避免占满 Docker Desktop 内存
       NODE_OPTIONS: "--max-old-space-size=768"
     ports:
-      - "5601:5601"
+      - "127.0.0.1:5601:5601"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -315,7 +328,7 @@ services:
     environment: *app-env
     ports:
       # 宿主 9001 已被 MinIO 控制台占用，映射到 19001；服务间通信仍走容器名 auth:9001
-      - "19001:9001"
+      - "127.0.0.1:19001:9001"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -333,7 +346,8 @@ services:
       - redis
     environment: *app-env
     ports:
-      - "9002:9002"
+      # 业务服务端口仅供本机调试，外部流量统一走网关 8088
+      - "127.0.0.1:9002:9002"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -353,7 +367,7 @@ services:
       - ai-oj-sandbox
     environment: *app-env
     ports:
-      - "9003:9003"
+      - "127.0.0.1:9003:9003"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -372,7 +386,7 @@ services:
       - seata-server
     environment: *app-env
     ports:
-      - "9004:9004"
+      - "127.0.0.1:9004:9004"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -391,7 +405,7 @@ services:
       - minio
     environment: *app-env
     ports:
-      - "9005:9005"
+      - "127.0.0.1:9005:9005"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -412,7 +426,7 @@ services:
       # DashScope 密钥由宿主机 .env 注入（不入库、不提交仓库），Nacos 中仅引用 ${DASHSCOPE_API_KEY}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
     ports:
-      - "9006:9006"
+      - "127.0.0.1:9006:9006"
     networks:
       - ai-oj-net
     restart: unless-stopped
@@ -431,7 +445,7 @@ services:
       - rocketmq-broker
     environment: *app-env
     ports:
-      - "9007:9007"
+      - "127.0.0.1:9007:9007"
     networks:
       - ai-oj-net
     restart: unless-stopped

@@ -233,16 +233,17 @@ docker compose restart ai-oj-gateway ai-oj-auth ai-oj-problem ai-oj-judge ai-oj-
 
 默认管理员：`admin / admin123`（BCrypt 存储）。
 
-中间件凭据（仅开发环境）：
+中间件凭据（仅开发环境，生产请通过宿主机 `.env` 覆盖同名环境变量）：
 
-| 组件 | 地址 | 账号 / 口令 |
-|---|---|---|
-| MySQL | `localhost:3306` | `root` / `root123456` |
-| Redis | `localhost:6379` | 无密码 |
-| MinIO | `localhost:9000` | `minioadmin` / `minioadmin123` |
-| Seata TC | `localhost:8091` | `seata` / `seata` |
-| Nacos | `localhost:8848` | 内嵌 Derby，已关闭鉴权 |
+| 组件 | 地址 | 账号 / 口令 | 覆盖变量 |
+|---|---|---|---|
+| MySQL | `localhost:3306` | `root` / `root123456` | `MYSQL_ROOT_PASSWORD` |
+| Redis | `localhost:6379` | `redis123456` | `REDIS_PASSWORD` |
+| MinIO | `localhost:9000` | `minioadmin` / `minioadmin123` | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` |
+| Seata TC | `localhost:8091` | `seata` / `seata` | — |
+| Nacos | `localhost:8848` | 内嵌 Derby，已关闭鉴权 | — |
 
+> 端口防暴露：中间件与业务服务端口均绑定在宿主机 `127.0.0.1`，仅本机可访问；对外入口只有前端 `80` 与网关 `8088`。
 > 端口避让：网关宿主端口用 8088，auth 宿主端口用 19001（9001 被 MinIO 控制台占用）；服务间通信仍走容器名与容器端口。
 
 ---
@@ -350,6 +351,7 @@ npm run dev        # http://localhost:5173
 本地直连注意事项：
 
 - Nacos 配置中的 `mysql`、`redis`、`rocketmq-namesrv`、`minio`、`seata-server`、`sentinel-dashboard` 均为**容器名**。IDE 在宿主机运行时需在 Nacos 控制台把 `ai-oj-common.yaml` 与各服务配置中的 host 改为 `localhost`，或用本地 `application-local.yml` 覆盖数据源/Redis 配置。
+- Redis 已开启密码认证，IDE 直连时需设置环境变量 `REDIS_PASSWORD=redis123456`（与 compose 默认值一致）；MySQL/MinIO 同理可用 `MYSQL_ROOT_PASSWORD`、`MINIO_ROOT_USER`、`MINIO_ROOT_PASSWORD` 覆盖。
 - `vite.config.js` 的 `/api`、`/ws` 代理目标默认 `http://localhost:8088`（compose 暴露的网关宿主端口）；若在本地 IDE 直接启动网关（默认 8080），需同步改代理目标。
 - `/files` 代理直连 MinIO `http://localhost:9000/ai-oj-public`。
 

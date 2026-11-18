@@ -3,7 +3,10 @@
 set -e
 
 echo "等待 MinIO 就绪..."
-until mc alias set local http://minio:9000 minioadmin minioadmin123 > /dev/null 2>&1; do
+# 凭据由 compose 注入，未配置时退回开发默认值
+MINIO_USER="${MINIO_ROOT_USER:-minioadmin}"
+MINIO_PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin123}"
+until mc alias set local http://minio:9000 "$MINIO_USER" "$MINIO_PASSWORD" > /dev/null 2>&1; do
   sleep 2
 done
 

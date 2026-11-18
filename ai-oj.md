@@ -233,16 +233,17 @@ docker compose restart ai-oj-gateway ai-oj-auth ai-oj-problem ai-oj-judge ai-oj-
 
 默认管理员：`admin / admin123`（BCrypt 存储）。
 
-中间件凭据（仅开发环境）：
+中间件凭据（仅开发环境，生产请通过宿主机 `.env` 覆盖同名环境变量）：
 
-| 组件 | 地址 | 账号 / 口令 |
-|---|---|---|
-| MySQL | `localhost:3306` | `root` / `root123456` |
-| Redis | `localhost:6379` | 无密码 |
-| MinIO | `localhost:9000` | `minioadmin` / `minioadmin123` |
-| Seata TC | `localhost:8091` | `seata` / `seata` |
-| Nacos | `localhost:8848` | 内嵌 Derby，已关闭鉴权 |
+| 组件 | 地址 | 账号 / 口令 | 覆盖变量 |
+|---|---|---|---|
+| MySQL | `localhost:3306` | `root` / `root123456` | `MYSQL_ROOT_PASSWORD` |
+| Redis | `localhost:6379` | `redis123456` | `REDIS_PASSWORD` |
+| MinIO | `localhost:9000` | `minioadmin` / `minioadmin123` | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` |
+| Seata TC | `localhost:8091` | `seata` / `seata` | — |
+| Nacos | `localhost:8848` | 内嵌 Derby，已关闭鉴权 | — |
 
+> 端口防暴露：中间件与业务服务端口均绑定在宿主机 `127.0.0.1`，仅本机可访问；对外入口只有前端 `80` 与网关 `8088`。
 > 端口避让：网关宿主端口用 8088，auth 宿主端口用 19001（9001 被 MinIO 控制台占用）；服务间通信仍走容器名与容器端口。
 
 ---
