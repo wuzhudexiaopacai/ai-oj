@@ -28,8 +28,12 @@ public class SandboxClient {
      */
     private static final String TOKEN_HEADER = "X-Sandbox-Token";
 
-    @Value("${ai-oj.judge.judge-timeout-seconds:120}")
-    private long judgeTimeoutSeconds;
+    /**
+     * 沙箱单次调用超时（秒）：一次判题需编译 + 逐用例运行，
+     * 必须独立于「卡死判定阈值」，否则多用例题目会被误杀
+     */
+    @Value("${ai-oj.judge.sandbox-call-timeout-seconds:300}")
+    private long sandboxCallTimeoutSeconds;
 
     /**
      * 沙箱访问令牌（与沙箱 SANDBOX_API_TOKEN 一致），为空表示沙箱未开启校验
@@ -53,7 +57,7 @@ public class SandboxClient {
                 .bodyValue(request))
                 .retrieve()
                 .bodyToMono(SandboxJudgeResponse.class)
-                .timeout(Duration.ofSeconds(judgeTimeoutSeconds))
+                .timeout(Duration.ofSeconds(sandboxCallTimeoutSeconds))
                 .block();
     }
 
@@ -71,7 +75,7 @@ public class SandboxClient {
                 .bodyValue(request))
                 .retrieve()
                 .bodyToMono(SandboxRunResponse.class)
-                .timeout(Duration.ofSeconds(judgeTimeoutSeconds))
+                .timeout(Duration.ofSeconds(sandboxCallTimeoutSeconds))
                 .block();
     }
 

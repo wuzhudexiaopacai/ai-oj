@@ -49,8 +49,11 @@ ai-oj:
     stuck-scan-cron: "0 * * * * ?"
     # 判题结果 Outbox 补投（Quartz Cron）：默认每 20 秒扫描投递失败的待投递记录
     outbox-resend-cron: "0/20 * * * * ?"
-    # 判题超时阈值（秒），超过视为沙箱异常
-    judge-timeout-seconds: 120
+    # 卡死判定阈值（秒）：超过该时间仍未完成的提交由扫描任务重新投递
+    # 必须大于沙箱单次调用超时，避免仍在正常判题的提交被误判为卡死
+    judge-timeout-seconds: 600
+    # 沙箱单次调用超时（秒）：覆盖一次完整判题（编译 + 全部用例），与卡死阈值解耦
+    sandbox-call-timeout-seconds: 300
     # 沙箱访问令牌（与沙箱 SANDBOX_API_TOKEN 保持一致），为空表示沙箱未开启校验
     sandbox-token: ${SANDBOX_API_TOKEN:}
     # 沙箱心跳：定时探测 /health 刷新 last_heartbeat
