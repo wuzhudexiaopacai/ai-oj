@@ -38,7 +38,8 @@ CREATE TABLE judge_submission (
     KEY idx_user_problem (user_id, problem_id),
     KEY idx_problem (problem_id),
     KEY idx_status (status),
-    KEY idx_contest (contest_id)
+    KEY idx_contest (contest_id),
+    KEY idx_contest_user (contest_id, user_id)
 ) ENGINE = InnoDB COMMENT '判题提交表';
 
 -- -----------------------------

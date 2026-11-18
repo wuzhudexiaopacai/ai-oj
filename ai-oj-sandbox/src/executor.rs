@@ -113,9 +113,9 @@ impl Executor {
         stack_limit_mb: u64,
     ) -> Result<CaseRunOutcome, SandboxError> {
         let task_dir = self.task_dir(task_id);
-        // 容器内 timeout 秒数（向上取整，含语言时间补偿）
+        // 容器内 timeout 支持小数秒，避免整秒向上取整带来最多 1s 的判定误差
         let limit_ms = (time_limit_ms as f64 * lang.time_factor) as u64;
-        let timeout_secs = ((limit_ms + 999) / 1000).max(1);
+        let timeout = timeout_arg(limit_ms);
         // 栈空间限制（KB）：ulimit 不受支持时忽略，不影响判题
         let stack_kb = stack_limit_mb * 1024;
         // 容器内存上限（含语言补偿），同时作为 -Xmx 等运行参数的模板取值
@@ -124,15 +124,26 @@ impl Executor {
         let container_mb = (mem_bytes / (1024 * 1024)).max(1) as u64;
         let run_cmd = render_run_cmd(&lang.run_cmd, limit_ms, container_mb);
         // timeout 触发 TLE 时退出码为 124；
+        // 运行耗时在容器内测：只统计程序本身，排除容器创建/启动开销；
+        // date +%s%N 不可用（部分 busybox）时跳过，由外层 elapsed 兜底。
         // 程序结束后读取容器自身 cgroup 的内存峰值（memory.peak）写入 .mem，
         // 短时间运行的程序无法被 Docker stats 秒级采样捕获，cgroup 峰值是准确的兜底来源。
         let shell_cmd = format!(
-            "ulimit -s {stack_kb} 2>/dev/null; timeout {} {} < case_{seq}.in > case_{seq}.out 2> case_{seq}.err; rc=$?; \
+            "ulimit -s {stack_kb} 2>/dev/null; \
+             start_ns=$(date +%s%N 2>/dev/null); \
+             timeout {timeout} {run_cmd} < case_{seq}.in > case_{seq}.out 2> case_{seq}.err; rc=$?; \
+             end_ns=$(date +%s%N 2>/dev/null); \
+             if [ -n \"$start_ns\" ] && [ -n \"$end_ns\" ]; then \
+               case \"$start_ns$end_ns\" in \
+                 *[!0-9]*) : ;; \
+                 *) echo $(( (end_ns - start_ns) / 1000000 )) > case_{seq}.time ;; \
+               esac; \
+             fi; \
              cat /sys/fs/cgroup/memory.peak > case_{seq}.mem 2>/dev/null; \
              cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes >> case_{seq}.mem 2>/dev/null; \
              exit $rc",
-            timeout_secs,
-            run_cmd,
+            timeout = timeout,
+            run_cmd = run_cmd,
             seq = seq
         );
         let name = self.docker.container_name(task_id, &format!("case-{seq}"));
@@ -150,7 +161,19 @@ impl Executor {
                 Duration::from_millis(limit_ms + 2000),
             )
             .await?;
-        let time_ms = start.elapsed().as_millis() as u64;
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        // 优先使用容器内测得的真实运行耗时（不含容器启动），拿不到时用外层 elapsed 兜底
+        let measured_ms = match fs::read_to_string(format!("{task_dir}/case_{seq}.time")).await {
+            Ok(text) => text.trim().parse::<u64>().ok(),
+            Err(_) => None,
+        };
+        let time_ms = resolve_time_ms(
+            measured_ms,
+            result.timed_out,
+            result.exit_code,
+            elapsed_ms,
+            limit_ms,
+        );
 
         // 判题状态流转：兜底超时/退出码 124 -> TLE；137 -> MLE；其他非 0 -> RE；0 -> 视输出/内存再定
         let mut status = if result.timed_out || result.exit_code == 124 {
@@ -240,7 +263,8 @@ impl Executor {
     }
 
     /// 运行 checker：工作目录为 spj/，参数为 [输入文件, 期望输出文件, 实际输出文件]
-    /// exit 0 -> AC，其余一律 WA
+    /// 退出码约定：0 -> AC；其余非 0 -> WA（兼容历史 checker）；
+    /// 超时或崩溃信号（SIGSEGV/SIGABRT/SIGFPE/SIGKILL/SIGTERM）属于 checker 自身故障 -> SE
     async fn run_spj(
         &self,
         registry: &LanguageRegistry,
@@ -268,11 +292,7 @@ impl Executor {
                 Duration::from_secs(12),
             )
             .await?;
-        Ok(if !result.timed_out && result.exit_code == 0 {
-            Status::Accepted
-        } else {
-            Status::WrongAnswer
-        })
+        Ok(spj_status(result.timed_out, result.exit_code))
     }
 
     /// 完整评测流程：编译 -> 逐 case 运行 + 比对 -> 汇总
@@ -558,16 +578,56 @@ fn normalize_lines(s: &str) -> Vec<&str> {
     lines
 }
 
-/// 答案比对：完全相等或仅行尾空白/末尾空行差异 -> AC（主流 OJ 惯例）；否则 WA
+/// 答案比对（主流 OJ 惯例）：
+/// - 完全相等，或仅行尾空白/末尾空行差异 -> AC
+/// - 忽略所有空白后 token 序列一致 -> PE（内容正确，格式不规范）
+/// - 其余 -> WA
 fn compare_output(expected: &str, actual: &str) -> Status {
     if expected == actual || normalize_lines(expected) == normalize_lines(actual) {
         Status::Accepted
+    } else if expected.split_whitespace().eq(actual.split_whitespace()) {
+        Status::PresentationError
     } else {
         Status::WrongAnswer
     }
 }
 
+/// 毫秒级 timeout 参数：GNU coreutils / 现代 BusyBox 的 timeout 均支持小数秒
+fn timeout_arg(limit_ms: u64) -> String {
+    format!("{:.3}", limit_ms.max(1) as f64 / 1000.0)
+}
+
+/// 运行耗时取值：超时报告题目限制；否则优先容器内实测值，缺失时用外层 elapsed 兜底
+fn resolve_time_ms(
+    measured_ms: Option<u64>,
+    timed_out: bool,
+    exit_code: i64,
+    elapsed_ms: u64,
+    limit_ms: u64,
+) -> u64 {
+    if timed_out || exit_code == 124 {
+        return limit_ms;
+    }
+    measured_ms.unwrap_or(elapsed_ms)
+}
+
+/// SPJ 退出码语义：0 AC；其余非 0 视为 WA（兼容历史 checker）；
+/// 超时或常见崩溃信号（SIGSEGV/SIGABRT/SIGFPE/SIGKILL/SIGTERM）视为 checker 故障 -> SE
+fn spj_status(timed_out: bool, exit_code: i64) -> Status {
+    if timed_out || exit_code == 124 {
+        return Status::SystemError;
+    }
+    match exit_code {
+        0 => Status::Accepted,
+        134 | 136 | 137 | 139 | 143 => Status::SystemError,
+        _ => Status::WrongAnswer,
+    }
+}
+
 /// 汇总得分：OI 模式按用例分值累加；ACM 模式必须全部 AC 才计分，否则 0
+/// <p>
+/// PE 只影响用例展示（OI 下仍按用例得分计入），ACM 判定通过仍要求严格 AC，
+/// 与个人/题目通过统计口径保持一致。
 fn compute_total_score(io_score: bool, results: &[CaseResult]) -> u32 {
     if io_score {
         return results.iter().map(|c| c.score).sum();
@@ -685,6 +745,53 @@ mod tests {
     fn unique_case_seq_should_pass() {
         let cases = vec![judge_case(1), judge_case(2)];
         assert!(validate_cases(&cases).is_ok());
+    }
+
+    #[test]
+    fn compare_output_should_accept_trailing_whitespace() {
+        assert_eq!(compare_output("1 2\n", "1 2   \n\n"), Status::Accepted);
+    }
+
+    #[test]
+    fn compare_output_should_detect_presentation_error() {
+        assert_eq!(
+            compare_output("1 2\n3", "1\n2 3\n"),
+            Status::PresentationError
+        );
+        assert_eq!(compare_output("1 2", "1  2"), Status::PresentationError);
+    }
+
+    #[test]
+    fn compare_output_should_reject_different_tokens() {
+        assert_eq!(compare_output("1 2", "12"), Status::WrongAnswer);
+    }
+
+    #[test]
+    fn timeout_arg_should_keep_millisecond_precision() {
+        assert_eq!(timeout_arg(1001), "1.001");
+        assert_eq!(timeout_arg(1000), "1.000");
+        assert_eq!(timeout_arg(0), "0.001");
+    }
+
+    #[test]
+    fn resolve_time_ms_should_prefer_measured_value() {
+        assert_eq!(resolve_time_ms(Some(15), false, 0, 120, 1000), 15);
+        assert_eq!(resolve_time_ms(None, false, 0, 120, 1000), 120);
+        assert_eq!(resolve_time_ms(None, true, -1, 1100, 1000), 1000);
+        assert_eq!(resolve_time_ms(Some(10), false, 124, 1100, 1000), 1000);
+    }
+
+    #[test]
+    fn spj_status_should_distinguish_checker_failure() {
+        assert_eq!(spj_status(false, 0), Status::Accepted);
+        assert_eq!(spj_status(false, 1), Status::WrongAnswer);
+        // 255 是 C/C++ return -1 的表现，历史 checker 常用它表示 WA
+        assert_eq!(spj_status(false, 255), Status::WrongAnswer);
+        assert_eq!(spj_status(false, 124), Status::SystemError);
+        assert_eq!(spj_status(true, 0), Status::SystemError);
+        assert_eq!(spj_status(false, 137), Status::SystemError);
+        assert_eq!(spj_status(false, 139), Status::SystemError);
+        assert_eq!(spj_status(false, 143), Status::SystemError);
     }
 
     fn judge_case(seq: u32) -> JudgeCase {

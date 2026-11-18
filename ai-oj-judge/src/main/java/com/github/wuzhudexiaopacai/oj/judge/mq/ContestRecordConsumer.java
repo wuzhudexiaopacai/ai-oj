@@ -8,20 +8,29 @@ import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.entity.ContestRecord;
-import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.ContestRecordMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 比赛成绩消费者：判题结果更新 contest_record（排行榜读取时按赛制实时排序）
+ * <p>
+ * 成绩一律从 judge_submission 重算，而不是对消息做增量累加：
+ * <ul>
+ *     <li>OI 每题取最高分，重复提交不会把分数越加越高</li>
+ *     <li>消息重复/乱序不会重复计分，天然幂等，不再依赖 Redis 去重集合</li>
+ *     <li>写库使用 GREATEST 单调合并，并发消费也不会丢更新</li>
+ * </ul>
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -32,16 +41,9 @@ import java.time.ZoneId;
 @RocketMQMessageListener(consumerGroup = MqConstants.GROUP_CONTEST_RECORD, topic = MqConstants.JUDGE_RESULT_TOPIC)
 public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessage> {
 
-    /**
-     * 比赛已解题集合前缀：+ contestId:userId，member=problemId
-     */
-    private static final String CONTEST_SOLVED_KEY = "contest:solved:";
-
     private final ContestRecordMapper contestRecordMapper;
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
-
-    private final StringRedisTemplate stringRedisTemplate;
 
     private final ContestFeignClient contestFeignClient;
 
@@ -51,49 +53,84 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
         if (message.getContestId() == null || message.getContestId() == 0L) {
             return;
         }
-
-        ContestRecord record = contestRecordMapper.selectOne(new LambdaQueryWrapper<ContestRecord>()
-                .eq(ContestRecord::getContestId, message.getContestId())
-                .eq(ContestRecord::getUserId, message.getUserId()));
+        ContestRecord record = getOrInitRecord(message);
         if (record == null) {
-            log.warn("比赛成绩记录不存在 contestId={} userId={}", message.getContestId(), message.getUserId());
             return;
         }
 
-        boolean isAc = JudgeStatusEnum.ACCEPTED.getCode() == message.getStatusCode();
-        // 同一用户同一题去重：已 AC 过的题不再重复加分/计罚时
-        String solvedKey = CONTEST_SOLVED_KEY + message.getContestId() + ":" + message.getUserId();
-        Boolean alreadySolved = stringRedisTemplate.opsForSet()
-                .isMember(solvedKey, message.getProblemId().toString());
-        if (Boolean.TRUE.equals(alreadySolved)) {
-            log.info("用户 {} 在比赛 {} 中已 AC 题目 {}，跳过计分", message.getUserId(), message.getContestId(), message.getProblemId());
-            return;
-        }
+        int totalScore = nvl(judgeSubmissionMapper.selectBestScoreSumByContest(
+                message.getContestId(), message.getUserId()));
+        int acceptCount = nvl(judgeSubmissionMapper.selectSolvedCountByContest(
+                message.getContestId(), message.getUserId()));
 
-        if (isAc) {
-            stringRedisTemplate.opsForSet().add(solvedKey, message.getProblemId().toString());
-            record.setAcceptCount(record.getAcceptCount() + 1);
-            // 罚时 = 首次 AC 提交时间 - 比赛开始时间（sec）；报名时间与开赛时间无关，不能作为基准
-            JudgeSubmission submission = judgeSubmissionMapper.selectOne(new LambdaQueryWrapper<JudgeSubmission>()
-                    .eq(JudgeSubmission::getUserId, message.getUserId())
-                    .eq(JudgeSubmission::getSubmitId, message.getSubmitId()));
-            if (submission != null && submission.getCreateTime() != null) {
-                long startMillis = resolveContestStartMillis(message.getContestId(), record);
-                long submitMillis = submission.getCreateTime()
-                        .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-                record.setPenaltySeconds(record.getPenaltySeconds()
-                        + Math.max((submitMillis - startMillis) / 1000, 0));
+        // 罚时只在通过时可能变化；非通过消息远程查询比赛开始时间没有意义
+        long penaltySeconds = record.getPenaltySeconds() == null ? 0L : record.getPenaltySeconds();
+        if (isSolved(message.getStatusCode())) {
+            Long startMillis = queryContestStartMillis(message.getContestId());
+            if (startMillis == null) {
+                log.warn("比赛开始时间不可用，本次仅更新得分与通过数 contestId={} userId={}",
+                        message.getContestId(), message.getUserId());
+            } else {
+                penaltySeconds = calcPenaltySeconds(message.getContestId(), message.getUserId(), startMillis);
             }
         }
-        // OI 模式总分累加（ACM 模式下该值由排行榜策略忽略）
-        record.setTotalScore(record.getTotalScore() + (message.getScore() == null ? 0 : message.getScore()));
-        contestRecordMapper.updateById(record);
+
+        // 重算值正常只会增大，GREATEST 防止并发/乱序消息把成绩改小
+        contestRecordMapper.mergeScore(record.getId(), totalScore, acceptCount, penaltySeconds);
     }
 
     /**
-     * 获取比赛开始时间（epoch 毫秒）；比赛服务不可用时回退为报名时间并告警
+     * 查询成绩记录；报名初始化异常导致记录缺失时兜底补建，避免成绩消息被静默丢弃
      */
-    private long resolveContestStartMillis(Long contestId, ContestRecord record) {
+    private ContestRecord getOrInitRecord(JudgeResultMessage message) {
+        ContestRecord record = selectRecord(message.getContestId(), message.getUserId());
+        if (record != null) {
+            return record;
+        }
+        log.warn("比赛成绩记录缺失，按兜底逻辑补建 contestId={} userId={}",
+                message.getContestId(), message.getUserId());
+        ContestRecord created = new ContestRecord();
+        created.setContestId(message.getContestId());
+        created.setUserId(message.getUserId());
+        created.setUsername("");
+        created.setTotalScore(0);
+        created.setAcceptCount(0);
+        created.setPenaltySeconds(0L);
+        try {
+            contestRecordMapper.insert(created);
+            return created;
+        } catch (DuplicateKeyException e) {
+            // 并发补建：另一条消息已先插入，回查即可
+            return selectRecord(message.getContestId(), message.getUserId());
+        }
+    }
+
+    private ContestRecord selectRecord(Long contestId, Long userId) {
+        return contestRecordMapper.selectOne(new LambdaQueryWrapper<ContestRecord>()
+                .eq(ContestRecord::getContestId, contestId)
+                .eq(ContestRecord::getUserId, userId));
+    }
+
+    /**
+     * 计算 ACM 罚时：每题首次通过时间 - 比赛开始时间，逐题累加（秒）
+     */
+    private long calcPenaltySeconds(Long contestId, Long userId, long startMillis) {
+        List<LocalDateTime> firstAcceptedTimes = judgeSubmissionMapper
+                .selectFirstAcceptedTimesByContest(contestId, userId);
+        if (firstAcceptedTimes == null || firstAcceptedTimes.isEmpty()) {
+            return 0L;
+        }
+        return firstAcceptedTimes.stream()
+                .filter(Objects::nonNull)
+                .mapToLong(time -> Math.max(
+                        (time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() - startMillis) / 1000, 0))
+                .sum();
+    }
+
+    /**
+     * 获取比赛开始时间（epoch 毫秒）；不可用时返回 null，本次不更新罚时，避免用报名时间算出错误罚时
+     */
+    private Long queryContestStartMillis(Long contestId) {
         try {
             Result<ContestRuntimeDTO> result = contestFeignClient.runtime(contestId, null);
             if (result != null && result.isSuccess() && result.getData() != null
@@ -101,10 +138,16 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
                 return result.getData().getStartTimeMillis();
             }
         } catch (Exception e) {
-            log.warn("查询比赛开始时间失败，罚时基准回退为报名时间 contestId={}", contestId, e);
+            log.error("查询比赛开始时间失败 contestId={}", contestId, e);
         }
-        return record.getCreateTime() == null
-                ? System.currentTimeMillis()
-                : record.getCreateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        return null;
+    }
+
+    private boolean isSolved(Integer statusCode) {
+        return statusCode != null && statusCode == JudgeStatusEnum.ACCEPTED.getCode();
+    }
+
+    private int nvl(Integer value) {
+        return value == null ? 0 : value;
     }
 }
