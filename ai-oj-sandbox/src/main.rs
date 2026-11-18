@@ -9,6 +9,7 @@ mod model;
 use std::sync::Arc;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -54,6 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/languages", get(handler::languages))
         .route("/run", post(handler::run))
         .route("/judge", post(handler::judge))
+        // 请求体上限：避免超大 JSON 撑爆内存（axum 默认仅 2MB，判题用例通常更大）
+        .layer(DefaultBodyLimit::max(config.max_body_bytes as usize))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&config.listen_addr).await?;

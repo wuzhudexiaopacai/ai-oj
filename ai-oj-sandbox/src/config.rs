@@ -4,6 +4,11 @@ fn default_docker_host() -> String {
     "unix:///var/run/docker.sock".to_string()
 }
 
+/// 请求体默认上限 64MB：题面用例与源代码一次性提交，超大请求直接拒绝
+fn default_max_body_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+
 /// 服务配置，从 config.toml 加载
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +29,9 @@ pub struct AppConfig {
     pub compile_timeout_secs: u64,
     pub compile_memory_mb: u64,
     pub output_limit_bytes: u64,
+    /// HTTP 请求体上限（字节），超限请求在解析 JSON 前即被拒绝
+    #[serde(default = "default_max_body_bytes")]
+    pub max_body_bytes: u64,
     pub task_ttl_secs: u64,
 }
 
@@ -83,8 +91,51 @@ impl AppConfig {
         if let Some(v) = env("SANDBOX_OUTPUT_LIMIT_BYTES").and_then(|v| v.parse().ok()) {
             self.output_limit_bytes = v;
         }
+        if let Some(v) = env("SANDBOX_MAX_BODY_BYTES").and_then(|v| v.parse().ok()) {
+            self.max_body_bytes = v;
+        }
         if let Some(v) = env("SANDBOX_TASK_TTL_SECS").and_then(|v| v.parse().ok()) {
             self.task_ttl_secs = v;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 除待测字段外的最小可解析配置
+    const BASE: &str = r#"
+listen_addr = "0.0.0.0:8000"
+max_parallel = 4
+work_dir = "/work"
+work_volume = "ai-oj-work"
+container_prefix = "ai-oj-sandbox-"
+default_time_limit_ms = 2000
+default_memory_limit_mb = 256
+compile_timeout_secs = 60
+compile_memory_mb = 512
+output_limit_bytes = 16777216
+task_ttl_secs = 300
+"#;
+
+    #[test]
+    fn max_body_bytes_should_default_to_64mb() {
+        let config: AppConfig = toml::from_str(BASE).unwrap();
+        assert_eq!(config.max_body_bytes, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn max_body_bytes_should_be_configurable() {
+        let config: AppConfig =
+            toml::from_str(&format!("{BASE}\nmax_body_bytes = 1048576")).unwrap();
+        assert_eq!(config.max_body_bytes, 1024 * 1024);
+    }
+
+    #[test]
+    fn docker_host_should_default_to_local_socket() {
+        let config: AppConfig = toml::from_str(BASE).unwrap();
+        assert_eq!(config.docker_host, "unix:///var/run/docker.sock");
+        assert!(config.api_token.is_none());
     }
 }

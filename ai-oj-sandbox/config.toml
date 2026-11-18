@@ -22,5 +22,7 @@ compile_timeout_secs = 60
 compile_memory_mb = 512
 # 输出读取上限（字节），超过判 OLE
 output_limit_bytes = 16777216
+# HTTP 请求体上限（字节），默认 64MB；超限请求在解析前即被拒绝
+max_body_bytes = 67108864
 # 任务目录保留时间（秒），到期异步清理
 task_ttl_secs = 300
