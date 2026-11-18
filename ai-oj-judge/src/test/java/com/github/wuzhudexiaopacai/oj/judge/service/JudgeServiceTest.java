@@ -1,18 +1,26 @@
 package com.github.wuzhudexiaopacai.oj.judge.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemBriefDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
+import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
+import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeOutboxMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,12 +30,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RedissonClient;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.messaging.Message;
 
 import java.lang.reflect.Field;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +55,12 @@ class JudgeServiceTest {
 
     @Mock
     private JudgeSubmissionMapper judgeSubmissionMapper;
+
+    @Mock
+    private JudgeCaseResultMapper judgeCaseResultMapper;
+
+    @Mock
+    private JudgeOutboxMapper judgeOutboxMapper;
 
     @Mock
     private SandboxRegistry sandboxRegistry;
@@ -74,6 +93,15 @@ class JudgeServiceTest {
         Field field = JudgeService.class.getDeclaredField("supportedLanguages");
         field.setAccessible(true);
         field.set(judgeService, List.of("c", "cpp", "java", "python3", "go", "javascript", "rust"));
+    }
+
+    /**
+     * LambdaUpdateWrapper 需要实体 TableInfo 缓存，纯单测环境手动注册
+     */
+    @BeforeAll
+    static void initTableInfo() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                JudgeSubmission.class);
     }
 
     @AfterEach
@@ -121,6 +149,31 @@ class JudgeServiceTest {
         BizException ex = assertThrows(BizException.class, () -> judgeService.submit(req));
 
         assertTrue(ex.getMessage().contains("暂不可用"));
+    }
+
+    @Test
+    void rejudgeShouldResetResultAndRequeue() {
+        JudgeSubmission submission = new JudgeSubmission();
+        submission.setId(1L);
+        submission.setSubmitId("submit-1");
+        when(judgeSubmissionMapper.selectById(1L)).thenReturn(submission);
+
+        judgeService.rejudge(1L);
+
+        verify(judgeSubmissionMapper).update(isNull(), any());
+        verify(judgeCaseResultMapper).delete(any());
+        verify(judgeOutboxMapper).delete(any());
+        verify(rocketMQTemplate).syncSend(eq(MqConstants.JUDGE_SUBMIT_TOPIC), any(Message.class), eq(5000L));
+    }
+
+    @Test
+    void rejudgeShouldRejectMissingSubmission() {
+        when(judgeSubmissionMapper.selectById(1L)).thenReturn(null);
+
+        BizException ex = assertThrows(BizException.class, () -> judgeService.rejudge(1L));
+
+        assertTrue(ex.getMessage().contains("提交记录不存在"));
+        verifyNoInteractions(rocketMQTemplate);
     }
 
     private JudgeSubmitRequest requestOf(String language) {

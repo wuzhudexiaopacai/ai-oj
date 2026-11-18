@@ -1,6 +1,7 @@
 package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemBriefDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
@@ -16,8 +17,12 @@ import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
 import com.github.wuzhudexiaopacai.oj.judge.dto.CaseValidateRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
+import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeCaseResult;
+import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeOutbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
+import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeOutboxMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mq.JudgeSubmitMessage;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
@@ -56,6 +61,10 @@ import java.util.concurrent.TimeUnit;
 public class JudgeService {
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
+
+    private final JudgeCaseResultMapper judgeCaseResultMapper;
+
+    private final JudgeOutboxMapper judgeOutboxMapper;
 
     private final SandboxRegistry sandboxRegistry;
 
@@ -158,6 +167,46 @@ public class JudgeService {
                 5000);
 
         return new SubmitResultVO(submission.getId());
+    }
+
+    /**
+     * 重判提交（管理端）：重置为排队中并清空上一轮结果，再重新投递判题消息
+     * <p>
+     * 适用于题目用例/SPJ/限制变更后需要重新评测历史提交；
+     * 旧用例明细与结果 Outbox 一并清理，避免复判期间展示上一轮数据或结果消息被判定为已投递。
+     *
+     * @param submissionId 提交记录 ID
+     */
+    public void rejudge(Long submissionId) {
+        JudgeSubmission submission = judgeSubmissionMapper.selectById(submissionId);
+        Asserts.notNull(submission, "提交记录不存在");
+
+        // updateById 会忽略 null 字段，这里必须用 UpdateWrapper 显式清空错误信息与判题时间
+        judgeSubmissionMapper.update(null, new LambdaUpdateWrapper<JudgeSubmission>()
+                .eq(JudgeSubmission::getId, submissionId)
+                .set(JudgeSubmission::getStatus, JudgeStatusEnum.PENDING.getCode())
+                .set(JudgeSubmission::getScore, 0)
+                .set(JudgeSubmission::getTimeUsed, 0)
+                .set(JudgeSubmission::getMemoryUsed, 0)
+                .set(JudgeSubmission::getRetryCount, 0)
+                .set(JudgeSubmission::getErrorMessage, null)
+                .set(JudgeSubmission::getJudgeTime, null));
+
+        judgeCaseResultMapper.delete(new LambdaQueryWrapper<JudgeCaseResult>()
+                .eq(JudgeCaseResult::getSubmissionId, submissionId));
+        judgeOutboxMapper.delete(new LambdaQueryWrapper<JudgeOutbox>()
+                .eq(JudgeOutbox::getSubmitId, submission.getSubmitId()));
+
+        JudgeSubmitMessage message = JudgeSubmitMessage.builder()
+                .submitId(submission.getSubmitId())
+                .submissionId(submissionId)
+                .build();
+        rocketMQTemplate.syncSend(MqConstants.JUDGE_SUBMIT_TOPIC,
+                MessageBuilder.withPayload(message)
+                        .setHeader(RocketMQHeaders.KEYS, submission.getSubmitId())
+                        .build(),
+                5000);
+        log.info("提交 {} 已重新入队判题", submission.getSubmitId());
     }
 
     /**

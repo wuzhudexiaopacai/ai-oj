@@ -32,7 +32,7 @@ spring:
         - id: ai-oj-judge
           uri: lb://ai-oj-judge
           predicates:
-            - Path=/api/judge/**, /api/submission/**, /api/admin/dead-letter/**
+            - Path=/api/judge/**, /api/submission/**, /api/admin/dead-letter/**, /api/admin/submission/**
           filters:
             - StripPrefix=1
         - id: ai-oj-contest
