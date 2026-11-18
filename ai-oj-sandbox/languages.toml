@@ -1,5 +1,10 @@
 # 语言配置：镜像由宿主预先拉取
 # time_factor / memory_factor 为补偿系数（如 Java 启动开销大，给 2 倍时间）
+#
+# run_cmd 支持占位符（按题目限制动态渲染，避免把内存参数写死）：
+#   {time_ms}   当前用例的有效时间限制（已乘 time_factor）
+#   {memory_mb} 容器内存上限（已乘 memory_factor）
+#   {heap_mb}   堆内存建议值（容器上限的 75%，为元空间/栈/GC 预留余量）
 
 [[languages]]
 name = "c"
@@ -24,7 +29,7 @@ name = "java"
 image = "eclipse-temurin:21-jdk"
 source_file = "Main.java"
 compile_cmd = ["javac", "Main.java"]
-run_cmd = ["java", "-Xmx256m", "Main"]
+run_cmd = ["java", "-Xmx{heap_mb}m", "Main"]
 time_factor = 2.0
 memory_factor = 2.0
 
@@ -49,7 +54,7 @@ memory_factor = 1.0
 name = "javascript"
 image = "node:20-alpine"
 source_file = "main.js"
-run_cmd = ["node", "main.js"]
+run_cmd = ["node", "--max-old-space-size={heap_mb}", "main.js"]
 time_factor = 2.0
 memory_factor = 1.0
 

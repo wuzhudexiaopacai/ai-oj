@@ -118,6 +118,11 @@ impl Executor {
         let timeout_secs = ((limit_ms + 999) / 1000).max(1);
         // 栈空间限制（KB）：ulimit 不受支持时忽略，不影响判题
         let stack_kb = stack_limit_mb * 1024;
+        // 容器内存上限（含语言补偿），同时作为 -Xmx 等运行参数的模板取值
+        let mem_bytes = (memory_limit_mb as f64 * lang.memory_factor * 1024.0 * 1024.0) as i64;
+        let limit_kb = (mem_bytes / 1024) as u64;
+        let container_mb = (mem_bytes / (1024 * 1024)).max(1) as u64;
+        let run_cmd = render_run_cmd(&lang.run_cmd, limit_ms, container_mb);
         // timeout 触发 TLE 时退出码为 124；
         // 程序结束后读取容器自身 cgroup 的内存峰值（memory.peak）写入 .mem，
         // 短时间运行的程序无法被 Docker stats 秒级采样捕获，cgroup 峰值是准确的兜底来源。
@@ -127,11 +132,9 @@ impl Executor {
              cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes >> case_{seq}.mem 2>/dev/null; \
              exit $rc",
             timeout_secs,
-            lang.run_cmd.join(" "),
+            run_cmd,
             seq = seq
         );
-        let mem_bytes = (memory_limit_mb as f64 * lang.memory_factor * 1024.0 * 1024.0) as i64;
-        let limit_kb = (mem_bytes / 1024) as u64;
         let name = self.docker.container_name(task_id, &format!("case-{seq}"));
 
         let start = Instant::now();
@@ -149,9 +152,13 @@ impl Executor {
             .await?;
         let time_ms = start.elapsed().as_millis() as u64;
 
-        // 判题状态流转：兜底超时/退出码 124 -> TLE；其他非 0 -> RE；0 -> 视输出/内存再定
+        // 判题状态流转：兜底超时/退出码 124 -> TLE；137 -> MLE；其他非 0 -> RE；0 -> 视输出/内存再定
         let mut status = if result.timed_out || result.exit_code == 124 {
             Status::TimeLimitExceeded
+        } else if result.exit_code == 137 {
+            // 137 = 128 + SIGKILL：容器内存超限时内核 OOM Killer 以 SIGKILL 强杀进程，
+            // 该场景必须上报 MLE，否则内存限制会被误判成运行错误
+            Status::MemoryLimitExceeded
         } else if result.exit_code != 0 {
             Status::RuntimeError
         } else {
@@ -244,12 +251,11 @@ impl Executor {
     ) -> Result<Status, SandboxError> {
         let lang = registry.get(&spj.language)?;
         let spj_dir = format!("{}/spj", self.task_dir(task_id));
+        // checker 固定 10s / 256MB 容器，内存占位符按容器值渲染
+        let run_cmd = render_run_cmd(&lang.run_cmd, 10_000, 256);
         let shell_cmd = format!(
             "timeout 10 {} ../case_{}.in ../case_{}.expected ../case_{}.out",
-            lang.run_cmd.join(" "),
-            seq,
-            seq,
-            seq
+            run_cmd, seq, seq, seq
         );
         let result = self
             .docker
@@ -299,6 +305,20 @@ impl Executor {
         task_id: &str,
         containers: &mut Vec<String>,
     ) -> Result<JudgeResponse, SandboxError> {
+        // 题目配置校验：空用例会让任何能编译的代码直接 AC，重复 seq 会让用例文件互相覆盖，
+        // 二者都属于题目配置错误，按 SYSTEM_ERROR 上报，不能污染用户提交结论
+        if let Err(reason) = validate_cases(&req.cases) {
+            return Ok(JudgeResponse {
+                submission_id: req.submission_id,
+                compile: CompileInfo {
+                    success: false,
+                    log: reason,
+                },
+                overall_status: Status::SystemError,
+                total_score: 0,
+                cases: Vec::new(),
+            });
+        }
         let task_dir = self.task_dir(task_id);
         fs::create_dir_all(&task_dir).await?;
         let lang = registry.get(&req.language)?;
@@ -559,6 +579,37 @@ fn compute_total_score(io_score: bool, results: &[CaseResult]) -> u32 {
     }
 }
 
+/// 渲染运行命令模板，支持占位符：
+/// - `{time_ms}`：当前用例的有效时间限制（已含语言补偿）
+/// - `{memory_mb}`：容器内存上限（已含语言补偿）
+/// - `{heap_mb}`：堆内存建议值（容器上限的 75%，为元空间/线程栈/GC 预留余量）
+fn render_run_cmd(template: &[String], time_limit_ms: u64, memory_limit_mb: u64) -> String {
+    let heap_mb = (memory_limit_mb * 3 / 4).max(16);
+    template
+        .iter()
+        .map(|part| {
+            part.replace("{time_ms}", &time_limit_ms.to_string())
+                .replace("{memory_mb}", &memory_limit_mb.to_string())
+                .replace("{heap_mb}", &heap_mb.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 用例配置校验：空用例 / 重复 seq 均属于题目配置错误
+fn validate_cases(cases: &[JudgeCase]) -> Result<(), String> {
+    if cases.is_empty() {
+        return Err("题目未配置评测用例，无法判题".to_string());
+    }
+    let mut seen = std::collections::HashSet::with_capacity(cases.len());
+    for case in cases {
+        if !seen.insert(case.seq) {
+            return Err(format!("评测用例序号重复：{}", case.seq));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,5 +648,51 @@ mod tests {
             case_result(Status::Accepted, 50),
         ];
         assert_eq!(compute_total_score(false, &all_accepted), 100);
+    }
+
+    #[test]
+    fn render_run_cmd_should_replace_placeholders() {
+        let template = vec![
+            "java".to_string(),
+            "-Xmx{heap_mb}m".to_string(),
+            "-Dlimit={memory_mb}".to_string(),
+            "Main".to_string(),
+        ];
+        assert_eq!(
+            render_run_cmd(&template, 2000, 512),
+            "java -Xmx384m -Dlimit=512 Main"
+        );
+    }
+
+    #[test]
+    fn render_run_cmd_should_keep_plain_command() {
+        let template = vec!["./main".to_string()];
+        assert_eq!(render_run_cmd(&template, 1000, 256), "./main");
+    }
+
+    #[test]
+    fn empty_cases_should_be_rejected() {
+        assert!(validate_cases(&[]).is_err());
+    }
+
+    #[test]
+    fn duplicated_case_seq_should_be_rejected() {
+        let cases = vec![judge_case(1), judge_case(1)];
+        assert!(validate_cases(&cases).is_err());
+    }
+
+    #[test]
+    fn unique_case_seq_should_pass() {
+        let cases = vec![judge_case(1), judge_case(2)];
+        assert!(validate_cases(&cases).is_ok());
+    }
+
+    fn judge_case(seq: u32) -> JudgeCase {
+        JudgeCase {
+            seq,
+            input: String::new(),
+            expected_output: String::new(),
+            score: 0,
+        }
     }
 }

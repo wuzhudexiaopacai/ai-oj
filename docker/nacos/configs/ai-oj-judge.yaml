@@ -43,6 +43,8 @@ ai-oj:
     progress-ttl-seconds: 3600
     # 同用户对同题最短提交间隔（秒），防重复提交
     submit-interval-seconds: 5
+    # 允许提交的编程语言白名单（逗号分隔，需与沙箱 languages.toml 的 name 一致）
+    supported-languages: c,cpp,java,python3,go,javascript,rust
     # 卡死任务扫描（Quartz Cron）：每分钟扫描超时仍未完成的提交
     stuck-scan-cron: "0 * * * * ?"
     # 判题超时阈值（秒），超过视为沙箱异常

@@ -59,9 +59,11 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -87,6 +89,11 @@ public class ProblemServiceImpl implements ProblemService {
      * 状态：上架
      */
     private static final int STATUS_ONLINE = 1;
+
+    /**
+     * 状态：下架（草稿）
+     */
+    private static final int STATUS_OFFLINE = 0;
 
     /**
      * 可见性：公开
@@ -317,6 +324,7 @@ public class ProblemServiceImpl implements ProblemService {
         dto.setProblemKey(problem.getProblemKey());
         dto.setTitle(problem.getTitle());
         dto.setDifficulty(problem.getDifficulty());
+        dto.setStatus(problem.getStatus());
         return dto;
     }
 
@@ -339,6 +347,8 @@ public class ProblemServiceImpl implements ProblemService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long create(ProblemSaveDTO saveDTO) {
+        Integer effectiveStatus = saveDTO.getStatus() == null ? STATUS_ONLINE : saveDTO.getStatus();
+        validateTestCases(null, saveDTO.getTestCases(), effectiveStatus);
         Long count = problemMapper.selectCount(new LambdaQueryWrapper<Problem>()
                 .eq(Problem::getProblemKey, saveDTO.getProblemKey()));
         Asserts.isTrue(count == 0, "题号已存在");
@@ -346,9 +356,7 @@ public class ProblemServiceImpl implements ProblemService {
         BeanUtil.copyProperties(saveDTO, problem, "id");
         problem.setAcceptCount(0);
         problem.setSubmitCount(0);
-        if (problem.getStatus() == null) {
-            problem.setStatus(STATUS_ONLINE);
-        }
+        problem.setStatus(effectiveStatus);
         if (problem.getAuth() == null) {
             problem.setAuth(AUTH_PUBLIC);
         }
@@ -363,6 +371,9 @@ public class ProblemServiceImpl implements ProblemService {
     public void update(Long id, ProblemSaveDTO saveDTO) {
         Problem exist = problemMapper.selectById(id);
         Asserts.notNull(exist, "题目不存在");
+        Integer effectiveStatus = saveDTO.getStatus() != null ? saveDTO.getStatus()
+                : (exist.getStatus() == null ? STATUS_ONLINE : exist.getStatus());
+        validateTestCases(id, saveDTO.getTestCases(), effectiveStatus);
         Long count = problemMapper.selectCount(new LambdaQueryWrapper<Problem>()
                 .eq(Problem::getProblemKey, saveDTO.getProblemKey())
                 .ne(Problem::getId, id));
@@ -464,6 +475,42 @@ public class ProblemServiceImpl implements ProblemService {
         }
         if (row.getMemoryLimit() == null) {
             row.setMemoryLimit(256);
+        }
+    }
+
+    /**
+     * 评测用例校验：上架/比赛中题目必须至少配置一条用例，且 seq 为正整数、题目内唯一。
+     * <p>
+     * 空用例会让沙箱对任何能编译的代码直接判 AC，必须在题目保存阶段拦住；
+     * 重复 seq 会让沙箱用例文件互相覆盖并触发判题明细唯一键冲突。
+     *
+     * @param problemId 题目 ID（新增时为 null）
+     * @param cases     本次提交的用例列表；null 表示更新时保留原用例
+     * @param status    生效状态（0下架 1上架 2比赛中）
+     */
+    void validateTestCases(Long problemId, List<TestCaseSaveDTO> cases, Integer status) {
+        boolean requireCases = !Integer.valueOf(STATUS_OFFLINE).equals(status);
+        if (cases == null) {
+            if (!requireCases) {
+                return;
+            }
+            if (problemId == null) {
+                Asserts.fail("题目至少需要配置一个评测用例");
+            }
+            // 更新时未传用例表示保留原用例，需确认库中仍有用例
+            Long count = testCaseMapper.selectCount(new LambdaQueryWrapper<TestCase>()
+                    .eq(TestCase::getProblemId, problemId));
+            Asserts.isTrue(count != null && count > 0, "题目至少需要配置一个评测用例");
+            return;
+        }
+        if (requireCases) {
+            Asserts.isTrue(!cases.isEmpty(), "题目至少需要配置一个评测用例");
+        }
+        Set<Integer> seqSet = new HashSet<>();
+        for (TestCaseSaveDTO testCase : cases) {
+            Asserts.notNull(testCase.getSeq(), "用例序号不能为空");
+            Asserts.isTrue(testCase.getSeq() > 0, "用例序号必须为正整数");
+            Asserts.isTrue(seqSet.add(testCase.getSeq()), "用例序号重复：" + testCase.getSeq());
         }
     }
 

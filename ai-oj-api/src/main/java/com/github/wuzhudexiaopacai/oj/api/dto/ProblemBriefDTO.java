@@ -29,4 +29,12 @@ public class ProblemBriefDTO implements Serializable {
      */
     @Schema(description = "难度：0简单 1中等 2困难", example = "0")
     private Integer difficulty;
+
+    /**
+     * 题目状态：0下架 1上架 2比赛中
+     * <p>
+     * 提交前置校验使用：下架题目不允许提交，避免判题阶段才发现题目不可用
+     */
+    @Schema(description = "题目状态：0下架 1上架 2比赛中", example = "1")
+    private Integer status;
 }

@@ -2,7 +2,9 @@ package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.ContestRuntimeDTO;
+import com.github.wuzhudexiaopacai.oj.api.dto.ProblemBriefDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
+import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
@@ -39,6 +41,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -66,6 +69,14 @@ public class JudgeService {
 
     private final ContestFeignClient contestFeignClient;
 
+    private final ProblemFeignClient problemFeignClient;
+
+    /**
+     * 允许提交的编程语言白名单，需与沙箱 languages.toml 的 name 保持一致
+     */
+    @Value("${ai-oj.judge.supported-languages:c,cpp,java,python3,go,javascript,rust}")
+    private List<String> supportedLanguages;
+
     @Value("${ai-oj.judge.submit-interval-seconds:5}")
     private long submitIntervalSeconds;
 
@@ -85,6 +96,9 @@ public class JudgeService {
         if (existing != null) {
             return new SubmitResultVO(existing.getId());
         }
+
+        // 前置校验：语言白名单 + 题目存在且未下架，避免进入异步判题后才失败
+        validateSubmitRequest(req);
 
         Long contestId = req.getContestId() == null ? 0L : req.getContestId();
         // 比赛提交前置校验：已报名 + 比赛进行中 + 题目属于该比赛，杜绝赛前/赛后刷分
@@ -157,6 +171,38 @@ public class JudgeService {
         return judgeSubmissionMapper.selectOne(new LambdaQueryWrapper<JudgeSubmission>()
                 .eq(JudgeSubmission::getUserId, userId)
                 .eq(JudgeSubmission::getSubmitId, submitId));
+    }
+
+    /**
+     * 提交前置校验：语言白名单 + 题目存在且未下架
+     * <p>
+     * 非法请求必须在同步阶段拒绝：题目不存在/已下架要等到异步判题阶段才会暴露，
+     * 期间会消耗业务重试次数并最终落入死信，用户体验与系统负载都很差。
+     * 语言统一转小写存储，与沙箱 languages.toml 的 name 对齐。
+     *
+     * @param req 提交请求
+     */
+    private void validateSubmitRequest(JudgeSubmitRequest req) {
+        String rawLanguage = req.getLanguage() == null ? "" : req.getLanguage().trim();
+        String language = rawLanguage.toLowerCase(Locale.ROOT);
+        boolean supported = supportedLanguages != null && supportedLanguages.stream()
+                .anyMatch(item -> item.equalsIgnoreCase(language));
+        Asserts.isTrue(supported, "不支持的编程语言：" + req.getLanguage());
+        req.setLanguage(language);
+
+        Result<ProblemBriefDTO> result;
+        try {
+            result = problemFeignClient.getBrief(req.getProblemId());
+        } catch (Exception e) {
+            log.error("提交前置校验题目状态失败 problemId={}", req.getProblemId(), e);
+            throw new BizException("题目服务暂不可用，请稍后重试");
+        }
+        if (result == null || !result.isSuccess()) {
+            throw new BizException("题目服务暂不可用，请稍后重试");
+        }
+        ProblemBriefDTO brief = result.getData();
+        Asserts.notNull(brief, "题目不存在");
+        Asserts.isTrue(brief.getStatus() == null || brief.getStatus() != 0, "题目已下架，暂不可提交");
     }
 
     /**
