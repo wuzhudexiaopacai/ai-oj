@@ -36,6 +36,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -202,6 +203,17 @@ public class JudgeExecuteService {
             sandboxLoadStrategy.occupy(sandbox.getSandboxKey());
             try {
                 return sandboxClient.judge(sandbox.getBaseUrl(), request);
+            } catch (WebClientResponseException e) {
+                lastException = e;
+                int status = e.getStatusCode().value();
+                // 4xx 表示请求本身不合法（参数/用例/令牌错误），换沙箱重试无意义，
+                // 且沙箱本身是健康的，不能拉黑，否则一次坏请求会打掉正常实例
+                if (status >= 400 && status < 500) {
+                    log.error("沙箱拒绝判题请求 HTTP {}，请求非法不重试 sandbox={}", status, sandbox.getSandboxKey(), e);
+                    throw new BizException("沙箱拒绝判题请求：HTTP " + status);
+                }
+                log.error("沙箱调用失败，拉黑并换机重试 sandbox={} attempt={}", sandbox.getSandboxKey(), i + 1, e);
+                sandboxLoadStrategy.blacklist(sandbox.getSandboxKey());
             } catch (Exception e) {
                 lastException = e;
                 log.error("沙箱调用失败，拉黑并换机重试 sandbox={} attempt={}", sandbox.getSandboxKey(), i + 1, e);
