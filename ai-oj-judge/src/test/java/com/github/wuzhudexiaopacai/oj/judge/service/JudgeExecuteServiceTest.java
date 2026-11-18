@@ -21,6 +21,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -35,10 +37,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 沙箱选择与重试测试：4xx 请求错误不应拉黑健康沙箱，5xx/网络异常才换机
+ * 判题执行测试：提交级互斥锁、沙箱选择与重试（4xx 不拉黑，5xx/网络异常换机）
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -77,6 +80,12 @@ class JudgeExecuteServiceTest {
 
     @Mock
     private StringRedisTemplate stringRedisTemplate;
+
+    @Mock
+    private RedissonClient redissonClient;
+
+    @Mock
+    private RLock executeLock;
 
     @Mock
     private ObjectMapper objectMapper;
@@ -120,7 +129,25 @@ class JudgeExecuteServiceTest {
         verify(sandboxLoadStrategy, times(1)).blacklist(second.getSandboxKey());
     }
 
+    @Test
+    void duplicatedConsumeShouldSkipWhenLockHeldByOthers() throws InterruptedException {
+        when(redissonClient.getLock(anyString())).thenReturn(executeLock);
+        when(executeLock.tryLock(anyLong(), any())).thenReturn(false);
+
+        assertDoesNotThrow(() -> judgeExecuteService.execute(SUBMISSION_ID));
+
+        verify(judgeSubmissionMapper, never()).selectById(anyLong());
+        verifyNoInteractions(sandboxClient);
+    }
+
     private void stubSubmissionFlow(List<JudgeSandbox> sandboxes) {
+        when(redissonClient.getLock(anyString())).thenReturn(executeLock);
+        try {
+            when(executeLock.tryLock(anyLong(), any())).thenReturn(true);
+        } catch (InterruptedException e) {
+            throw new IllegalStateException(e);
+        }
+        when(executeLock.isHeldByCurrentThread()).thenReturn(true);
         when(judgeSubmissionMapper.selectById(anyLong())).thenReturn(pendingSubmission());
         when(problemFeignClient.getJudgeInfo(anyLong())).thenReturn(Result.ok(problemWithOneCase()));
         when(sandboxRegistry.listAvailable()).thenReturn(sandboxes);

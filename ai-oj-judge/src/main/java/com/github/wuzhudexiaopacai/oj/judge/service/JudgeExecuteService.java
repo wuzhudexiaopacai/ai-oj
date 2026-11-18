@@ -32,6 +32,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.apache.rocketmq.spring.support.RocketMQHeaders;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.support.MessageBuilder;
@@ -41,6 +43,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 判题执行核心服务（供消费者调用）
@@ -83,6 +86,8 @@ public class JudgeExecuteService {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    private final RedissonClient redissonClient;
+
     private final ObjectMapper objectMapper;
 
     private final JudgeWsPushService judgeWsPushService;
@@ -92,10 +97,42 @@ public class JudgeExecuteService {
 
     /**
      * 执行判题主流程
+     * <p>
+     * 同一提交可能被 MQ 重投与卡死补偿任务同时消费，必须按 submissionId 互斥：
+     * 抢不到锁说明已有实例在判，本次直接返回，由持锁实例完成落库与广播。
      *
      * @param submissionId 提交记录 ID
      */
     public void execute(Long submissionId) {
+        RLock lock = redissonClient.getLock(RedisKeys.JUDGE_EXECUTE_LOCK + submissionId);
+        boolean locked;
+        try {
+            locked = lock.tryLock(0, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("提交 {} 获取判题锁被中断，跳过本次消费", submissionId);
+            return;
+        }
+        if (!locked) {
+            log.info("提交 {} 正在判题中，跳过本次重复消费", submissionId);
+            return;
+        }
+        try {
+            doExecute(submissionId);
+        } finally {
+            // 只释放本线程持有的锁，避免误删其他实例的锁
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+    }
+
+    /**
+     * 判题执行主体（调用方已持有提交级互斥锁）
+     *
+     * @param submissionId 提交记录 ID
+     */
+    private void doExecute(Long submissionId) {
         JudgeSubmission submission = judgeSubmissionMapper.selectById(submissionId);
         // 幂等：不存在/已终态直接跳过
         if (submission == null) {
