@@ -1,7 +1,8 @@
 //! bollard 封装：子容器创建、等待、日志、stats 采样、清理
 //!
-//! sibling container 模式：本服务通过挂载的 /var/run/docker.sock 操作宿主 Docker，
-//! 子容器与本服务挂载同一个 ai-oj-work volume 到相同路径 /work，路径天然一致。
+//! sibling container 模式：本服务通过 Docker 守护进程（socket 或 socket-proxy）创建子容器。
+//! 子容器只挂载 ai-oj-work 卷中"本次任务"的子目录（volume subpath），
+//! 无法读取其他任务的用例与期望输出；子容器内挂载点统一为 /work。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,7 +14,7 @@ use bollard::container::{
     ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions, StartContainerOptions,
     StatsOptions, WaitContainerOptions,
 };
-use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::models::{HostConfig, Mount, MountTypeEnum, MountVolumeOptions};
 use bollard::Docker;
 use bollard::API_DEFAULT_VERSION;
 use futures_util::StreamExt;
@@ -66,40 +67,51 @@ impl DockerManager {
         format!("{}{}-{}", self.container_prefix, task_id, suffix)
     }
 
-    /// 共享工作目录挂载：volume ai-oj-work -> /work（子容器内可写）
-    fn work_mount(&self) -> Mount {
+    /// 单任务挂载：volume ai-oj-work 的 {taskId} 子目录 -> 子容器 /work
+    ///
+    /// 使用 Docker 卷 subpath（要求 Docker Engine 26+），子容器只能看到本次任务的
+    /// 输入/输出/编译产物，无法遍历同一卷下其他任务的用例。
+    fn task_mount(&self, task_id: &str) -> Mount {
         Mount {
             target: Some(self.work_dir.clone()),
             source: Some(self.work_volume.clone()),
             typ: Some(MountTypeEnum::VOLUME),
             read_only: Some(false),
+            volume_options: Some(MountVolumeOptions {
+                subpath: Some(task_id.to_string()),
+                // 不把镜像中原有 /work 内容复制进 volume 子目录
+                no_copy: Some(true),
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
 
     /// 创建并启动一个子容器，等待退出后收集结果。
-    /// 调用方负责传入安全限制（HostConfig），本函数自动追加 /work 挂载。
+    /// 调用方负责传入安全限制（HostConfig）；本函数自动追加"仅本任务目录"的挂载。
     pub async fn run_container(
         &self,
         name: &str,
         image: &str,
         cmd: Vec<String>,
-        working_dir: &str,
+        task_id: &str,
+        container_workdir: &str,
         host_config: HostConfig,
         timeout: Duration,
     ) -> Result<ContainerResult, SandboxError> {
+        validate_task_id(task_id)?;
         // 防御：同名残留容器先强删
         let _ = self.remove_container(name).await;
 
         let mut hc = host_config;
         let mut mounts = hc.mounts.take().unwrap_or_default();
-        mounts.push(self.work_mount());
+        mounts.push(self.task_mount(task_id));
         hc.mounts = Some(mounts);
 
         let config = Config {
             image: Some(image.to_string()),
             cmd: Some(cmd),
-            working_dir: Some(working_dir.to_string()),
+            working_dir: Some(container_workdir.to_string()),
             attach_stdout: Some(true),
             attach_stderr: Some(true),
             host_config: Some(hc),
@@ -276,5 +288,44 @@ impl DockerManager {
             }
             Err(e) => warn!("清理残留容器失败: {e}"),
         }
+    }
+}
+
+/// 任务标识校验：仅允许 ASCII 字母数字与 `-`/`_`，长度 1..=64
+///
+/// 任务目录会作为卷 subpath 使用，必须杜绝 `..`、`/` 等路径穿越字符。
+fn validate_task_id(task_id: &str) -> Result<(), SandboxError> {
+    let valid = !task_id.is_empty()
+        && task_id.len() <= 64
+        && task_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(SandboxError::Internal(format!("非法任务标识: {task_id}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_task_id;
+
+    #[test]
+    fn uuid_task_id_should_pass() {
+        assert!(validate_task_id("1f0c9b8e-4a52-4d1a-9f0b-3c2d1e4a5b6c").is_ok());
+    }
+
+    #[test]
+    fn path_traversal_should_be_rejected() {
+        assert!(validate_task_id("../other-task").is_err());
+        assert!(validate_task_id("..").is_err());
+        assert!(validate_task_id("a/b").is_err());
+        assert!(validate_task_id("").is_err());
+    }
+
+    #[test]
+    fn overlong_task_id_should_be_rejected() {
+        assert!(validate_task_id(&"a".repeat(65)).is_err());
     }
 }

@@ -82,14 +82,14 @@ impl Executor {
                 log: String::new(),
             });
         };
-        let working_dir = self.task_dir(task_id);
         let result = self
             .docker
             .run_container(
                 container_name,
                 &lang.image,
                 cmd.clone(),
-                &working_dir,
+                task_id,
+                &self.config.work_dir,
                 self.compile_host_config(),
                 Duration::from_secs(self.config.compile_timeout_secs),
             )
@@ -155,7 +155,8 @@ impl Executor {
                 &name,
                 &lang.image,
                 vec!["sh".into(), "-c".into(), shell_cmd],
-                &task_dir,
+                task_id,
+                &self.config.work_dir,
                 self.run_host_config(mem_bytes),
                 // 兜底超时：容器内 timeout 之外再 +2s
                 Duration::from_millis(limit_ms + 2000),
@@ -245,7 +246,8 @@ impl Executor {
                         container_name,
                         &lang.image,
                         cmd.clone(),
-                        &spj_dir,
+                        task_id,
+                        &format!("{}/spj", self.config.work_dir),
                         self.compile_host_config(),
                         Duration::from_secs(self.config.compile_timeout_secs),
                     )
@@ -274,7 +276,6 @@ impl Executor {
         container_name: &str,
     ) -> Result<Status, SandboxError> {
         let lang = registry.get(&spj.language)?;
-        let spj_dir = format!("{}/spj", self.task_dir(task_id));
         // checker 固定 10s / 256MB 容器，内存占位符按容器值渲染
         let run_cmd = render_run_cmd(&lang.run_cmd, 10_000, 256);
         let shell_cmd = format!(
@@ -287,7 +288,8 @@ impl Executor {
                 container_name,
                 &lang.image,
                 vec!["sh".into(), "-c".into(), shell_cmd],
-                &spj_dir,
+                task_id,
+                &format!("{}/spj", self.config.work_dir),
                 self.run_host_config(256 * 1024 * 1024),
                 Duration::from_secs(12),
             )
