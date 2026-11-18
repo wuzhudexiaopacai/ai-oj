@@ -53,16 +53,6 @@ import java.util.List;
 public class JudgeExecuteService {
 
     /**
-     * 题目判题信息缓存前缀
-     */
-    private static final String PROBLEM_INFO_CACHE = "judge:problem:info:";
-
-    /**
-     * 题目判题信息缓存 TTL（秒），降 Feign 压力
-     */
-    private static final long PROBLEM_INFO_TTL = 60L;
-
-    /**
      * 重投递延时级别（RocketMQ 延时级别 3 = 10s）
      */
     private static final int RETRY_DELAY_LEVEL = 3;
@@ -150,19 +140,12 @@ public class JudgeExecuteService {
     }
 
     /**
-     * 拉取题目判题信息（Redis 缓存 60s 降 Feign 压力）
+     * 拉取题目判题信息
+     * <p>
+     * 不使用 Redis 缓存：该对象包含全部评测用例与 SPJ 源码，明文写入共享 Redis
+     * 会让任何能访问 Redis 的组件直接拿到测试数据。每次判题按需经 Feign/MinIO 拉取。
      */
     private ProblemJudgeDTO loadProblemInfo(Long problemId) {
-        String cacheKey = PROBLEM_INFO_CACHE + problemId;
-        try {
-            String cached = stringRedisTemplate.opsForValue().get(cacheKey);
-            if (cached != null) {
-                return objectMapper.readValue(cached, ProblemJudgeDTO.class);
-            }
-        } catch (Exception e) {
-            log.warn("题目信息缓存读取失败 problemId={}", problemId, e);
-        }
-
         Result<ProblemJudgeDTO> result = problemFeignClient.getJudgeInfo(problemId);
         if (result == null || !result.isSuccess() || result.getData() == null) {
             throw new BizException("拉取题目判题信息失败 problemId=" + problemId);
@@ -179,13 +162,6 @@ public class JudgeExecuteService {
                     judgeCase.setOutput(loadFileContent(judgeCase.getOutputFile()));
                 }
             }
-        }
-
-        try {
-            stringRedisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(problem),
-                    Duration.ofSeconds(PROBLEM_INFO_TTL));
-        } catch (Exception e) {
-            log.warn("题目信息缓存写入失败 problemId={}", problemId, e);
         }
         return problem;
     }
