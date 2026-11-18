@@ -32,9 +32,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -67,9 +68,20 @@ public class SubmissionService {
     private final FileFeignClient fileFeignClient;
 
     /**
-     * 题目简要信息本地缓存：提交记录分页时避免逐行远程调用
+     * 题目简要信息本地缓存上限：题目数可能持续增长，必须限制容量避免堆内存无限膨胀
      */
-    private final Map<Long, ProblemBriefDTO> problemBriefCache = new ConcurrentHashMap<>();
+    private static final int PROBLEM_BRIEF_CACHE_SIZE = 5000;
+
+    /**
+     * 题目简要信息本地缓存：提交记录分页时避免逐行远程调用（按访问顺序淘汰的 LRU）
+     */
+    private final Map<Long, ProblemBriefDTO> problemBriefCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, ProblemBriefDTO> eldest) {
+                    return size() > PROBLEM_BRIEF_CACHE_SIZE;
+                }
+            });
 
     /**
      * 当前用户提交分页

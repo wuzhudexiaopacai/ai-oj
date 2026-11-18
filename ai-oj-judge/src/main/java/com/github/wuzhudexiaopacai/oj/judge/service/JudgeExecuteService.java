@@ -43,6 +43,7 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -69,6 +70,12 @@ public class JudgeExecuteService {
      * 题目未配置 stack_limit 时的默认栈空间（MB）
      */
     private static final int DEFAULT_STACK_LIMIT_MB = 256;
+
+    /**
+     * error_message 最大字节数：MySQL TEXT 上限 65535 字节，
+     * 中文 3 字节/字，按字符截断仍可能溢出，必须按 UTF-8 字节截断
+     */
+    private static final int ERROR_MESSAGE_MAX_BYTES = 60000;
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
@@ -325,7 +332,7 @@ public class JudgeExecuteService {
         submission.setTimeUsed(maxTime);
         submission.setMemoryUsed(maxMemory);
         if (response.compile() != null && Boolean.FALSE.equals(response.compile().success())) {
-            submission.setErrorMessage(StrUtil.subPre(response.compile().log(), 60000));
+            submission.setErrorMessage(truncateUtf8(response.compile().log(), ERROR_MESSAGE_MAX_BYTES));
         }
         stateMachineService.sendEvent(submission, JudgeEvent.COMPLETE, finalStatus);
         if (!caseResults.isEmpty()) {
@@ -432,6 +439,31 @@ public class JudgeExecuteService {
     }
 
     /**
+     * 按 UTF-8 字节截断文本，避免超过 TEXT 列上限导致落库失败
+     * <p>
+     * 截断点可能落在多字节字符中间，需要去掉末尾残生的替换字符。
+     *
+     * @param text     原始文本
+     * @param maxBytes 最大字节数
+     * @return 截断后的文本
+     */
+    static String truncateUtf8(String text, int maxBytes) {
+        if (text == null) {
+            return null;
+        }
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length <= maxBytes) {
+            return text;
+        }
+        String truncated = new String(bytes, 0, maxBytes, StandardCharsets.UTF_8);
+        int end = truncated.length();
+        while (end > 0 && truncated.charAt(end - 1) == '\uFFFD') {
+            end--;
+        }
+        return truncated.substring(0, end);
+    }
+
+    /**
      * 执行失败处理：retry_count++ 落库，未达上限延时重投，否则抛异常走 RocketMQ 重试进 DLQ
      */
     private void handleExecuteFailure(JudgeSubmission submission, Exception e) {
@@ -440,7 +472,11 @@ public class JudgeExecuteService {
             return;
         }
         submission.setRetryCount((submission.getRetryCount() == null ? 0 : submission.getRetryCount()) + 1);
-        judgeSubmissionMapper.updateById(submission);
+        // 乐观锁冲突（影响行数为 0）说明其他实例已更新该提交，放弃本次重试避免重复判题
+        if (judgeSubmissionMapper.updateById(submission) == 0) {
+            log.warn("提交 {} 状态已被并发修改，跳过本次失败重试", submission.getSubmitId());
+            return;
+        }
 
         if (submission.getRetryCount() < MqConstants.JUDGE_MAX_RETRY) {
             // 延时重新投递回原 topic

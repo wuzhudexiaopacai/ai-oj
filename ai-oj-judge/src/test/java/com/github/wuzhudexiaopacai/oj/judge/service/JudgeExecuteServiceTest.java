@@ -28,9 +28,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -142,6 +147,18 @@ class JudgeExecuteServiceTest {
 
         verify(judgeSubmissionMapper, never()).selectById(anyLong());
         verifyNoInteractions(sandboxClient);
+    }
+
+    @Test
+    void truncateUtf8ShouldRespectByteLimit() {
+        String text = "编".repeat(30000);
+        String truncated = JudgeExecuteService.truncateUtf8(text, 60000);
+
+        assertTrue(truncated.getBytes(StandardCharsets.UTF_8).length <= 60000);
+        assertFalse(truncated.contains("\uFFFD"), "截断不应留下半个多字节字符");
+        assertEquals(20000, truncated.length());
+        assertEquals("abc", JudgeExecuteService.truncateUtf8("abc", 100));
+        assertNull(JudgeExecuteService.truncateUtf8(null, 10));
     }
 
     private void stubSubmissionFlow(List<JudgeSandbox> sandboxes) {

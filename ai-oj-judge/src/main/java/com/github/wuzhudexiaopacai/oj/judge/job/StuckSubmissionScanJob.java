@@ -61,9 +61,12 @@ public class StuckSubmissionScanJob extends QuartzJobBean {
             try {
                 int retryCount = submission.getRetryCount() == null ? 0 : submission.getRetryCount();
                 if (retryCount < MqConstants.JUDGE_MAX_RETRY) {
-                    // 重试计数 +1 并重新投递
+                    // 重试计数 +1 并重新投递；乐观锁冲突说明已有其他实例处理，跳过本条
                     submission.setRetryCount(retryCount + 1);
-                    judgeSubmissionMapper.updateById(submission);
+                    if (judgeSubmissionMapper.updateById(submission) == 0) {
+                        log.warn("卡死提交 {} 状态已被并发修改，跳过", submission.getSubmitId());
+                        continue;
+                    }
                     JudgeSubmitMessage message = JudgeSubmitMessage.builder()
                             .submitId(submission.getSubmitId())
                             .submissionId(submission.getId())
