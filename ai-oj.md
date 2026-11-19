@@ -462,7 +462,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 - **状态机**：Spring StateMachine 工厂模式，每次消费新建实例；状态以 `judge_submission.status` 为权威存储，不做内存持久态
 - **进度通道**：WebSocket `/ws/judge` 为主，Redis `judge:progress:{userId}:{submitId}` 缓存 + HTTP 轮询兜底
 - **卡死补偿**：Quartz 集群模式（JDBC 持久化，`QRTZ_*`），`0 * * * * ?` 每分钟扫描非终态且超时的提交，重试 3 次后置 `SYSTEM_ERROR` 并广播
-- **沙箱调度**：最小负载优先（Redis Hash `judge:sandbox:load`），失败节点拉黑 30s，最多重试 3 次；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度
+- **沙箱调度**：最小负载优先（Redis key `judge:sandbox:load:{sandboxKey}`，带 10 分钟 TTL，进程崩溃后自动归零；全部实例满载时仍选最低负载者排队），失败节点拉黑 30s，最多重试 3 次（4xx 请求错误不拉黑）；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度
 
 ### AI 对话链路（POST + SSE）
 
@@ -546,6 +546,8 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - **栈限制**：按题目 `stack_limit` 设置 `ulimit -s`（默认 256MB），深递归程序栈溢出按 RE 返回，不会拖垮沙箱
 - **答案比对**：忽略行尾空白；支持 SPJ
 - **计分模式**：OI（`io_score=true`）按用例分值累计；ACM 模式仅全部用例通过才计分，否则 0 分
+- **弹性判题槽位**：并发容量按线程池语义伸缩——`core_parallel` 为常驻槽位，请求打满时自动扩容至 `max_parallel`，空闲后每 `shrink_interval_secs` 回收 1 个直至回落到 core；排队超过 `queue_timeout_secs` 返回 503，由判题端换机/退避重试
+- **断连保护**：判题在独立 tokio 任务中执行并持有槽位凭证，判题端中途超时断开也会跑完并清理子容器与任务目录；后台每分钟清理超过 `task_ttl_secs` 的残留任务目录
 
 支持 **7 种语言**（`ai-oj-sandbox/languages.toml`）：
 

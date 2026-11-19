@@ -1,7 +1,13 @@
 # 沙箱服务配置
 listen_addr = "0.0.0.0:8000"
-# 最大并行评测任务数，超出排队
+# 最大并行评测任务数（线程池 max 语义）：并发打满时自动扩容到此上限
 max_parallel = 4
+# 常驻并行槽位（线程池 core 语义）：空闲时回落到该数量，不会低于 1
+core_parallel = 2
+# 排队等待槽位超时（秒）：超过后返回 503，交由判题端换机或退避重试
+queue_timeout_secs = 60
+# 空闲槽位回收间隔（秒）：每轮回收 1 个，直至回落到 core_parallel
+shrink_interval_secs = 30
 # 工作目录（容器内挂载 ai-oj-work volume 的路径）
 work_dir = "/work"
 # 子容器共享 volume 名称

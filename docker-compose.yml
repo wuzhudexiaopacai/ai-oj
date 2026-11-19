@@ -282,7 +282,11 @@ services:
       - docker-socket-proxy
     environment:
       SANDBOX_LISTEN: 0.0.0.0:8000
-      SANDBOX_MAX_PARALLEL: "4"
+      # 弹性判题槽位：core 常驻并发、max 峰值并发，空闲按 shrink 间隔回收到 core
+      SANDBOX_CORE_PARALLEL: ${SANDBOX_CORE_PARALLEL:-2}
+      SANDBOX_MAX_PARALLEL: ${SANDBOX_MAX_PARALLEL:-4}
+      SANDBOX_QUEUE_TIMEOUT_SECS: ${SANDBOX_QUEUE_TIMEOUT_SECS:-60}
+      SANDBOX_SHRINK_INTERVAL_SECS: ${SANDBOX_SHRINK_INTERVAL_SECS:-30}
       SANDBOX_WORK_DIR: /work
       SANDBOX_WORK_VOLUME: ai-oj_ai-oj-work
       SANDBOX_DOCKER_HOST: tcp://docker-socket-proxy:2375

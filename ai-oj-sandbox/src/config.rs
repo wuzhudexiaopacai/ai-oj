@@ -9,12 +9,37 @@ fn default_max_body_bytes() -> u64 {
     64 * 1024 * 1024
 }
 
+/// 判题槽位常驻数量默认值：max_parallel 较小时自动收敛，实际取 min(core, max)
+fn default_core_parallel() -> usize {
+    2
+}
+
+/// 排队等待槽位超时（秒）：超过后返回 503，由判题端换机或退避重试
+fn default_queue_timeout_secs() -> u64 {
+    60
+}
+
+/// 空闲回收间隔（秒）：每次回调一个槽位，直至回落到 core_parallel
+fn default_shrink_interval_secs() -> u64 {
+    30
+}
+
 /// 服务配置，从 config.toml 加载
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct AppConfig {
     pub listen_addr: String,
+    /// 峰值并发槽位（线程池 max 语义）
     pub max_parallel: usize,
+    /// 常驻并发槽位（线程池 core 语义），自动收敛到 [1, max_parallel]
+    #[serde(default = "default_core_parallel")]
+    pub core_parallel: usize,
+    /// 排队等待槽位超时（秒）
+    #[serde(default = "default_queue_timeout_secs")]
+    pub queue_timeout_secs: u64,
+    /// 空闲槽位回收间隔（秒）
+    #[serde(default = "default_shrink_interval_secs")]
+    pub shrink_interval_secs: u64,
     pub work_dir: String,
     pub work_volume: String,
     pub container_prefix: String,
@@ -75,6 +100,15 @@ impl AppConfig {
         }
         if let Some(v) = env("SANDBOX_MAX_PARALLEL").and_then(|v| v.parse().ok()) {
             self.max_parallel = v;
+        }
+        if let Some(v) = env("SANDBOX_CORE_PARALLEL").and_then(|v| v.parse().ok()) {
+            self.core_parallel = v;
+        }
+        if let Some(v) = env("SANDBOX_QUEUE_TIMEOUT_SECS").and_then(|v| v.parse().ok()) {
+            self.queue_timeout_secs = v;
+        }
+        if let Some(v) = env("SANDBOX_SHRINK_INTERVAL_SECS").and_then(|v| v.parse().ok()) {
+            self.shrink_interval_secs = v;
         }
         if let Some(v) = env("SANDBOX_DEFAULT_TIME_LIMIT_MS").and_then(|v| v.parse().ok()) {
             self.default_time_limit_ms = v;
@@ -137,5 +171,24 @@ task_ttl_secs = 300
         let config: AppConfig = toml::from_str(BASE).unwrap();
         assert_eq!(config.docker_host, "unix:///var/run/docker.sock");
         assert!(config.api_token.is_none());
+    }
+
+    #[test]
+    fn pool_fields_should_have_defaults() {
+        let config: AppConfig = toml::from_str(BASE).unwrap();
+        assert_eq!(config.core_parallel, 2);
+        assert_eq!(config.queue_timeout_secs, 60);
+        assert_eq!(config.shrink_interval_secs, 30);
+    }
+
+    #[test]
+    fn pool_fields_should_be_configurable() {
+        let config: AppConfig = toml::from_str(&format!(
+            "{BASE}\ncore_parallel = 1\nqueue_timeout_secs = 10\nshrink_interval_secs = 5"
+        ))
+        .unwrap();
+        assert_eq!(config.core_parallel, 1);
+        assert_eq!(config.queue_timeout_secs, 10);
+        assert_eq!(config.shrink_interval_secs, 5);
     }
 }
