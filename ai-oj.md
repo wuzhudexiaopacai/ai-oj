@@ -422,7 +422,7 @@ ai-oj
 |---|---|
 | `ai_oj_auth` | `sys_user`（含 `submit_count` / `accept_count` 统计字段，由判题结果消息异步累加）、`sys_role`、`sys_permission`、`sys_user_role`、`sys_role_permission`、`sys_login_log` |
 | `ai_oj_problem` | `pms_problem`（`problem_key` 展示题号唯一）、`pms_test_case`、`pms_problem_language`、`pms_tag`、`pms_tag_category`、`pms_problem_tag`、`pms_solution` |
-| `ai_oj_judge` | `judge_submission`（`uk_user_submit` 唯一键做幂等兜底）、`judge_case_result`、`judge_sandbox`（`last_heartbeat` 记录心跳）、`contest_record`（`rank_snapshot` 由比赛结束结算写入）、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
+| `ai_oj_judge` | `judge_submission`（`uk_user_submit` 唯一键做幂等兜底）、`judge_case_result`、`judge_outbox`（判题结果本地消息表，失败补投）、`judge_sandbox`（`last_heartbeat` 记录心跳）、`contest_record`（`rank_snapshot` 由比赛结束结算写入）、`biz_dead_letter`、`undo_log`、`QRTZ_*`（11 张 Quartz 表） |
 | `ai_oj_contest` | `contest`、`contest_problem`、`contest_registration`（`contest_id + user_id` 唯一）、`undo_log` |
 | `ai_oj_file` | `file_record` |
 | `ai_oj_ai` | `ai_session`、`ai_message`、`ai_prompt_template` |
@@ -546,8 +546,37 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - **栈限制**：按题目 `stack_limit` 设置 `ulimit -s`（默认 256MB），深递归程序栈溢出按 RE 返回，不会拖垮沙箱
 - **答案比对**：忽略行尾空白；支持 SPJ
 - **计分模式**：OI（`io_score=true`）按用例分值累计；ACM 模式仅全部用例通过才计分，否则 0 分
-- **弹性判题槽位**：并发容量按线程池语义伸缩——`core_parallel` 为常驻槽位，请求打满时自动扩容至 `max_parallel`，空闲后每 `shrink_interval_secs` 回收 1 个直至回落到 core；排队超过 `queue_timeout_secs` 返回 503，由判题端换机/退避重试
+- **弹性判题槽位**：并发容量按线程池语义伸缩——`core_parallel` 为常驻槽位，请求打满时自动扩容至 `max_parallel`，空闲后每 `shrink_interval_secs` 回收 1 个直至回落到 core；排队超过 `queue_timeout_secs` 返回 503（判题端不拉黑、延时递增重投）。调整 `max_parallel` 时需同步更新 `judge_sandbox.max_parallel`，保证最小负载策略的负载率准确
 - **断连保护**：判题在独立 tokio 任务中执行并持有槽位凭证，判题端中途超时断开也会跑完并清理子容器与任务目录；后台每分钟清理超过 `task_ttl_secs` 的残留任务目录
+
+### 判题容量弹性扩缩（本轮更新）
+
+**改了什么、为什么这样改**
+
+| 变更 | 原来的问题 | 为什么这样改 |
+|---|---|---|
+| 判题槽位改为弹性池（core/max + 空闲回收） | 固定 `Semaphore(max_parallel)`：低峰照样占位，高峰只能无限排队 | 线程池语义最贴合判题负载——core 保证低峰即时响应，max 允许高峰扩容，空闲逐级回落到 core；不引入额外编排组件 |
+| 排队超时返回 503 | 请求在沙箱内无限期等待，最终被判题端 300s 超时打断 | 显式快速失败，让判题端换机或延时重投，避免拖死连接与槽位 |
+| 判题在独立任务中执行 + 断连清理 | 判题端断开后请求 future 被取消，`judge()` 的清理逻辑不执行，子容器与任务目录泄漏 | 清理必须跑完；槽位凭证随任务持有，断连也不会超卖并发 |
+| 过期任务目录兜底清理 | `task_ttl_secs` 是死配置，异常路径无人回收 | 兜底异常路径，共享卷不会无限增长 |
+| 429/503 不拉黑、重试退避递增 | 繁忙被当成故障拉黑 30s，单机部署会反复拉黑唯一健康实例 | 区分“忙”和“坏”：繁忙交给 MQ 按 10s→30s→1m 退避重投，给队列消化时间 |
+| 沙箱调用超时与卡死阈值解耦 | 两者共用 120s，多用例题目会被误判为卡死 | 单次调用（编译 + 全部用例）给 300s，卡死判定放宽到 600s，判定语义不再冲突 |
+
+**为什么不做“整台判题机自动开关”**：沙箱按安全设计不持有 Docker 控制权，无法自行拉起/销毁判题机；单机 compose 下要实现自动开关机需要额外的编排组件，收益低于风险。当前是在唯一可安全控制的位置（沙箱内部并发槽位）实现弹性；迁移到 k8s 后由 HPA 接管实例级弹性即可，判题代码无需改动。
+
+**容量配置**
+
+| 配置项 / 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `core_parallel` / `SANDBOX_CORE_PARALLEL` | 2 | 常驻并发槽位（线程池 core） |
+| `max_parallel` / `SANDBOX_MAX_PARALLEL` | 4 | 峰值并发槽位（线程池 max） |
+| `queue_timeout_secs` / `SANDBOX_QUEUE_TIMEOUT_SECS` | 60 | 排队等待槽位超时，超时返回 503 |
+| `shrink_interval_secs` / `SANDBOX_SHRINK_INTERVAL_SECS` | 30 | 空闲槽位回收间隔 |
+| `task_ttl_secs` / `SANDBOX_TASK_TTL_SECS` | 300 | 残留任务目录保留时长 |
+
+> 调整 `max_parallel` 后需同步更新 `judge_sandbox.max_parallel`，否则最小负载策略的负载率会失真。
+
+**已知边界**：每个用例仍拉起独立容器，这是当前性能上限的主要来源；改为单容器批量执行需要可靠的 cgroup 内存峰值重置，否则会误判 MLE，本轮未引入。
 
 支持 **7 种语言**（`ai-oj-sandbox/languages.toml`）：
 
