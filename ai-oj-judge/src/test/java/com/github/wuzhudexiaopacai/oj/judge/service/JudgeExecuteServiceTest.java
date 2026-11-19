@@ -122,6 +122,22 @@ class JudgeExecuteServiceTest {
     }
 
     @Test
+    void busyShouldNotBlacklistSandbox() {
+        JudgeSandbox sandbox = sandboxOf("sandbox-a");
+        stubSubmissionFlow(List.of(sandbox));
+        when(sandboxLoadStrategy.select(anyList())).thenReturn(sandbox);
+        when(sandboxClient.judge(anyString(), any()))
+                .thenThrow(new WebClientResponseException(503, "Service Unavailable", HttpHeaders.EMPTY, null, null));
+
+        assertDoesNotThrow(() -> judgeExecuteService.execute(SUBMISSION_ID));
+
+        // 繁忙不是故障：不拉黑、不换机，交给 MQ 延时重投
+        verify(sandboxClient, times(1)).judge(anyString(), any());
+        verify(sandboxLoadStrategy, never()).blacklist(anyString());
+        verify(sandboxLoadStrategy, times(1)).release(sandbox.getSandboxKey());
+    }
+
+    @Test
     void serverErrorShouldBlacklistAndSwitchSandbox() {
         JudgeSandbox first = sandboxOf("sandbox-a");
         JudgeSandbox second = sandboxOf("sandbox-b");

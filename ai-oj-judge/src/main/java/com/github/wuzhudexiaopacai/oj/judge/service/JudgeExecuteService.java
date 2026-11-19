@@ -256,7 +256,12 @@ public class JudgeExecuteService {
             } catch (WebClientResponseException e) {
                 lastException = e;
                 int status = e.getStatusCode().value();
-                // 4xx 表示请求本身不合法（参数/用例/令牌错误），换沙箱重试无意义，
+                // 429/503 表示沙箱繁忙（槽位排队超时），实例本身健康：不拉黑，交由 MQ 延时重投
+                if (status == 429 || status == 503) {
+                    log.warn("沙箱繁忙 HTTP {}，不拉黑，稍后重试 sandbox={}", status, sandbox.getSandboxKey());
+                    throw new BizException("沙箱繁忙：HTTP " + status);
+                }
+                // 其余 4xx 表示请求本身不合法（参数/用例/令牌错误），换沙箱重试无意义，
                 // 且沙箱本身是健康的，不能拉黑，否则一次坏请求会打掉正常实例
                 if (status >= 400 && status < 500) {
                     log.error("沙箱拒绝判题请求 HTTP {}，请求非法不重试 sandbox={}", status, sandbox.getSandboxKey(), e);
@@ -479,7 +484,9 @@ public class JudgeExecuteService {
         }
 
         if (submission.getRetryCount() < MqConstants.JUDGE_MAX_RETRY) {
-            // 延时重新投递回原 topic
+            // 延时重新投递回原 topic；随重试次数递增延时级别（10s -> 30s -> 1m），
+            // 沙箱持续繁忙时给队列留出消化时间，避免秒级反复抢占
+            int delayLevel = RETRY_DELAY_LEVEL + Math.min(submission.getRetryCount(), 2);
             JudgeSubmitMessage message = JudgeSubmitMessage.builder()
                     .submitId(submission.getSubmitId())
                     .submissionId(submission.getId())
@@ -488,8 +495,9 @@ public class JudgeExecuteService {
                     MessageBuilder.withPayload(message)
                             .setHeader(RocketMQHeaders.KEYS, submission.getSubmitId())
                             .build(),
-                    5000, RETRY_DELAY_LEVEL);
-            log.info("提交 {} 判题失败，延时重投 retryCount={}", submission.getSubmitId(), submission.getRetryCount());
+                    5000, delayLevel);
+            log.info("提交 {} 判题失败，延时重投 retryCount={} delayLevel={}",
+                    submission.getSubmitId(), submission.getRetryCount(), delayLevel);
         } else {
             // 超过业务重试上限，抛异常让 RocketMQ 重试，最终进 DLQ
             throw e instanceof BizException be ? be : new BizException("判题失败：" + e.getMessage());
