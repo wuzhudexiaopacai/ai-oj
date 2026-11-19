@@ -547,7 +547,7 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - **栈限制**：按题目 `stack_limit` 设置 `ulimit -s`（默认 256MB），深递归程序栈溢出按 RE 返回，不会拖垮沙箱
 - **答案比对**：忽略行尾空白；支持 SPJ
 - **计分模式**：OI（`io_score=true`）按用例分值累计；ACM 模式仅全部用例通过才计分，否则 0 分
-- **弹性判题槽位**：并发容量按线程池语义伸缩——`core_parallel` 为常驻槽位，请求打满时自动扩容至 `max_parallel`，空闲后每 `shrink_interval_secs` 回收 1 个直至回落到 core；排队超过 `queue_timeout_secs` 返回 503，由判题端换机/退避重试
+- **弹性判题槽位**：并发容量按线程池语义伸缩——`core_parallel` 为常驻槽位，请求打满时自动扩容至 `max_parallel`，空闲后每 `shrink_interval_secs` 回收 1 个直至回落到 core；排队超过 `queue_timeout_secs` 返回 503（判题端不拉黑、延时递增重投）。调整 `max_parallel` 时需同步更新 `judge_sandbox.max_parallel`，保证最小负载策略的负载率准确
 - **断连保护**：判题在独立 tokio 任务中执行并持有槽位凭证，判题端中途超时断开也会跑完并清理子容器与任务目录；后台每分钟清理超过 `task_ttl_secs` 的残留任务目录
 
 支持 **7 种语言**（`ai-oj-sandbox/languages.toml`）：
