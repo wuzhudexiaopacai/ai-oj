@@ -339,7 +339,12 @@ public class JudgeExecuteService {
         if (response.compile() != null && Boolean.FALSE.equals(response.compile().success())) {
             submission.setErrorMessage(truncateUtf8(response.compile().log(), ERROR_MESSAGE_MAX_BYTES));
         }
-        stateMachineService.sendEvent(submission, JudgeEvent.COMPLETE, finalStatus);
+
+        // 先写用例明细、后迁移终态：终态一旦落库就不会再重试，
+        // 若明细写入失败则提交会停在 JUDGING 并被重试，避免“有结论但用例明细永久缺失”。
+        // 重试时先删后插，保证明细不重复。
+        judgeCaseResultMapper.delete(new LambdaQueryWrapper<JudgeCaseResult>()
+                .eq(JudgeCaseResult::getSubmissionId, submission.getId()));
         if (!caseResults.isEmpty()) {
             // XML 批量插入不触发 MetaObjectHandler 与雪花 ID 填充，手动赋值
             for (JudgeCaseResult caseResult : caseResults) {
@@ -347,6 +352,7 @@ public class JudgeExecuteService {
             }
             judgeCaseResultMapper.insertBatch(caseResults);
         }
+        stateMachineService.sendEvent(submission, JudgeEvent.COMPLETE, finalStatus);
         log.info("提交 {} 判题完成 status={} score={}", submission.getSubmitId(), finalStatus, submission.getScore());
     }
 

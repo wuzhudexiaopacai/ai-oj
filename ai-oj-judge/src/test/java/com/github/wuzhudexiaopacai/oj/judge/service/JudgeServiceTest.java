@@ -7,6 +7,7 @@ import com.github.wuzhudexiaopacai.oj.api.feign.ContestFeignClient;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
+import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -156,6 +158,7 @@ class JudgeServiceTest {
         JudgeSubmission submission = new JudgeSubmission();
         submission.setId(1L);
         submission.setSubmitId("submit-1");
+        submission.setStatus(JudgeStatusEnum.WRONG_ANSWER.getCode());
         when(judgeSubmissionMapper.selectById(1L)).thenReturn(submission);
 
         judgeService.rejudge(1L);
@@ -164,6 +167,21 @@ class JudgeServiceTest {
         verify(judgeCaseResultMapper).delete(any());
         verify(judgeOutboxMapper).delete(any());
         verify(rocketMQTemplate).syncSend(eq(MqConstants.JUDGE_SUBMIT_TOPIC), any(Message.class), eq(5000L));
+    }
+
+    @Test
+    void rejudgeShouldRejectRunningSubmission() {
+        JudgeSubmission submission = new JudgeSubmission();
+        submission.setId(1L);
+        submission.setSubmitId("submit-1");
+        submission.setStatus(JudgeStatusEnum.JUDGING.getCode());
+        when(judgeSubmissionMapper.selectById(1L)).thenReturn(submission);
+
+        BizException ex = assertThrows(BizException.class, () -> judgeService.rejudge(1L));
+
+        assertTrue(ex.getMessage().contains("仍在判题中"));
+        verify(judgeSubmissionMapper, never()).update(any(), any());
+        verifyNoInteractions(rocketMQTemplate);
     }
 
     @Test

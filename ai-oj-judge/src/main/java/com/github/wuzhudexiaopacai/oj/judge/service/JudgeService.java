@@ -174,12 +174,19 @@ public class JudgeService {
      * <p>
      * 适用于题目用例/SPJ/限制变更后需要重新评测历史提交；
      * 旧用例明细与结果 Outbox 一并清理，避免复判期间展示上一轮数据或结果消息被判定为已投递。
+     * <p>
+     * 仅允许重判终态提交；统计口径（用户/题目通过数）以下游按 submitId 幂等去重为准，
+     * 重判结果不会重复累计提交数，也不会修正首次判题已计入的通过数。
      *
      * @param submissionId 提交记录 ID
      */
     public void rejudge(Long submissionId) {
         JudgeSubmission submission = judgeSubmissionMapper.selectById(submissionId);
         Asserts.notNull(submission, "提交记录不存在");
+        // 仅允许重判已结束的提交：判题中的提交仍在占用沙箱，此时重置状态会导致重复判题与结果互相覆盖
+        JudgeStatusEnum current = JudgeStatusEnum.fromCode(submission.getStatus());
+        Asserts.notNull(current, "非法判题状态");
+        Asserts.isTrue(current.isTerminal(), "提交仍在判题中，请等待结束后再重判");
 
         // updateById 会忽略 null 字段，这里必须用 UpdateWrapper 显式清空错误信息与判题时间
         judgeSubmissionMapper.update(null, new LambdaUpdateWrapper<JudgeSubmission>()

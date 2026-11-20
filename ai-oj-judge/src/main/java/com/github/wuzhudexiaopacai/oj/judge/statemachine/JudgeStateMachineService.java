@@ -110,7 +110,11 @@ public class JudgeStateMachineService {
         if (errorMessage != null) {
             submission.setErrorMessage(errorMessage);
         }
-        judgeSubmissionMapper.updateById(submission);
+        if (judgeSubmissionMapper.updateById(submission) == 0) {
+            // 乐观锁冲突：其他实例已更新该提交，终态以先落库者为准
+            log.warn("提交 {} 兜底置终态时发生并发冲突，跳过", submission.getSubmitId());
+            return;
+        }
         log.info("提交 {} 兜底置为终态 {}", submission.getSubmitId(), terminalStatus);
     }
 }

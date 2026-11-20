@@ -28,7 +28,7 @@ public class AdminSubmissionController {
 
     private final JudgeService judgeService;
 
-    @Operation(summary = "重判提交", description = "将指定提交重置为排队中并清空上一轮得分、耗时、内存、错误信息与用例明细，随后重新投递判题消息。适用于题目用例/SPJ/限制变更后重新评测历史提交。需 judge:submission:rejudge 权限。")
+    @Operation(summary = "重判提交", description = "将指定提交重置为排队中并清空上一轮得分、耗时、内存、错误信息与用例明细，随后重新投递判题消息。仅允许重判已结束的提交（判题中会被拒绝）；适用于题目用例/SPJ/限制变更后重新评测历史提交。重判结果的统计口径以下游按 submitId 幂等去重为准，不会重复累计提交数。需 judge:submission:rejudge 权限。")
     @OperationLog(module = "提交管理", operation = "重判提交", type = OpType.UPDATE)
     @PostMapping("/{id}/rejudge")
     @PreAuthorize("hasAuthority('judge:submission:rejudge')")

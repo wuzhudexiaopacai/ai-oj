@@ -1,6 +1,7 @@
 package com.github.wuzhudexiaopacai.oj.judge.sandbox;
 
 import cn.hutool.core.util.StrUtil;
+import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeRequest;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeResponse;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunRequest;
@@ -51,7 +52,7 @@ public class SandboxClient {
      * @return 判题响应
      */
     public SandboxJudgeResponse judge(String baseUrl, SandboxJudgeRequest request) {
-        return withToken(webClient.post()
+        SandboxJudgeResponse response = withToken(webClient.post()
                 .uri(baseUrl + "/judge")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request))
@@ -59,6 +60,11 @@ public class SandboxClient {
                 .bodyToMono(SandboxJudgeResponse.class)
                 .timeout(Duration.ofSeconds(sandboxCallTimeoutSeconds))
                 .block();
+        if (response == null) {
+            // 空响应体属于异常情况，显式报错以便换机重试，避免调用方 NPE
+            throw new BizException("沙箱判题响应为空 baseUrl=" + baseUrl);
+        }
+        return response;
     }
 
     /**
@@ -69,7 +75,7 @@ public class SandboxClient {
      * @return 运行响应
      */
     public SandboxRunResponse run(String baseUrl, SandboxRunRequest request) {
-        return withToken(webClient.post()
+        SandboxRunResponse response = withToken(webClient.post()
                 .uri(baseUrl + "/run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request))
@@ -77,6 +83,10 @@ public class SandboxClient {
                 .bodyToMono(SandboxRunResponse.class)
                 .timeout(Duration.ofSeconds(sandboxCallTimeoutSeconds))
                 .block();
+        if (response == null) {
+            throw new BizException("沙箱运行响应为空 baseUrl=" + baseUrl);
+        }
+        return response;
     }
 
     /**

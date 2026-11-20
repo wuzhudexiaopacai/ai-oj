@@ -42,7 +42,7 @@ public class StuckSubmissionScanJob extends QuartzJobBean {
 
     private final RocketMQTemplate rocketMQTemplate;
 
-    @Value("${ai-oj.judge.judge-timeout-seconds:120}")
+    @Value("${ai-oj.judge.judge-timeout-seconds:600}")
     private long judgeTimeoutSeconds;
 
     @Override
