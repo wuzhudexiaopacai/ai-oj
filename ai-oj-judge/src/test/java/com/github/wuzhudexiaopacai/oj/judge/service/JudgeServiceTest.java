@@ -10,7 +10,10 @@ import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
+import com.github.wuzhudexiaopacai.oj.judge.dto.CaseValidateRequest;
+import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeRunRequest;
 import com.github.wuzhudexiaopacai.oj.judge.dto.JudgeSubmitRequest;
+import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeOutboxMapper;
@@ -18,6 +21,7 @@ import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
+import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunRequest;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -25,20 +29,28 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.redisson.api.RRateLimiter;
 import org.redisson.api.RedissonClient;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.messaging.Message;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -84,6 +96,9 @@ class JudgeServiceTest {
 
     @Mock
     private ProblemFeignClient problemFeignClient;
+
+    @Mock
+    private RRateLimiter rateLimiter;
 
     @InjectMocks
     private JudgeService judgeService;
@@ -192,6 +207,93 @@ class JudgeServiceTest {
 
         assertTrue(ex.getMessage().contains("提交记录不存在"));
         verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void runShouldRejectUnsupportedLanguageBeforeSandbox() {
+        givenRateLimiterAcquires();
+
+        BizException ex = assertThrows(BizException.class,
+                () -> judgeService.run(runRequestOf("brainfuck")));
+
+        assertTrue(ex.getMessage().contains("不支持的编程语言"));
+        verifyNoInteractions(sandboxRegistry, sandboxClient, sandboxLoadStrategy);
+    }
+
+    @Test
+    void runShouldNotBlacklistSandboxOnClientError() {
+        givenRateLimiterAcquires();
+        givenSingleSandbox();
+        when(sandboxClient.run(anyString(), any()))
+                .thenThrow(sandboxError(400, "Bad Request"));
+
+        assertThrows(BizException.class, () -> judgeService.run(runRequestOf("cpp")));
+
+        verify(sandboxLoadStrategy).release("sbx-1");
+        verify(sandboxLoadStrategy, never()).blacklist(anyString());
+    }
+
+    @Test
+    void runShouldBlacklistSandboxOnServerError() {
+        givenRateLimiterAcquires();
+        givenSingleSandbox();
+        when(sandboxClient.run(anyString(), any()))
+                .thenThrow(sandboxError(500, "Internal Server Error"));
+
+        assertThrows(BizException.class, () -> judgeService.run(runRequestOf("cpp")));
+
+        verify(sandboxLoadStrategy).blacklist("sbx-1");
+        verify(sandboxLoadStrategy).release("sbx-1");
+    }
+
+    @Test
+    void validateCasesShouldClampTimeLimitAndNotBlacklistOnClientError() {
+        givenRateLimiterAcquires();
+        givenSingleSandbox();
+        when(sandboxClient.run(anyString(), any()))
+                .thenThrow(sandboxError(400, "Bad Request"));
+
+        CaseValidateRequest req = new CaseValidateRequest();
+        req.setLanguage("cpp");
+        req.setCode("int main() { return 0; }");
+        req.setTimeLimitMs(999999);
+        CaseValidateRequest.CaseItem item = new CaseValidateRequest.CaseItem();
+        item.setSeq(1);
+        item.setExpectedOutput("3");
+        req.setCases(List.of(item));
+
+        assertThrows(BizException.class, () -> judgeService.validateCases(req));
+
+        ArgumentCaptor<SandboxRunRequest> captor = ArgumentCaptor.forClass(SandboxRunRequest.class);
+        verify(sandboxClient).run(anyString(), captor.capture());
+        assertEquals(30000, captor.getValue().timeLimitMs().intValue());
+        verify(sandboxLoadStrategy, never()).blacklist(anyString());
+        verify(sandboxLoadStrategy).release("sbx-1");
+    }
+
+    private void givenRateLimiterAcquires() {
+        when(redissonClient.getRateLimiter(anyString())).thenReturn(rateLimiter);
+        when(rateLimiter.tryAcquire()).thenReturn(true);
+    }
+
+    private void givenSingleSandbox() {
+        JudgeSandbox sandbox = new JudgeSandbox();
+        sandbox.setSandboxKey("sbx-1");
+        sandbox.setBaseUrl("http://sandbox:8080");
+        when(sandboxRegistry.listAvailable()).thenReturn(List.of(sandbox));
+        when(sandboxLoadStrategy.select(anyList())).thenReturn(sandbox);
+    }
+
+    private WebClientResponseException sandboxError(int status, String reason) {
+        return WebClientResponseException.create(status, reason, HttpHeaders.EMPTY, new byte[0],
+                StandardCharsets.UTF_8);
+    }
+
+    private JudgeRunRequest runRequestOf(String language) {
+        JudgeRunRequest req = new JudgeRunRequest();
+        req.setLanguage(language);
+        req.setCode("print(1)");
+        return req;
     }
 
     private JudgeSubmitRequest requestOf(String language) {

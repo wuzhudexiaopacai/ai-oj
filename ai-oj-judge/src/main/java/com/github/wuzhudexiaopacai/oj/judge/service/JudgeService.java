@@ -43,6 +43,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,6 +60,11 @@ import java.util.concurrent.TimeUnit;
 @Service
 @RequiredArgsConstructor
 public class JudgeService {
+
+    /**
+     * 用例校验单组运行时间上限（毫秒）：用户可自定义，但必须封顶避免长期占用沙箱槽位
+     */
+    private static final int MAX_VALIDATE_TIME_LIMIT_MS = 30000;
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
@@ -239,12 +245,7 @@ public class JudgeService {
      * @param req 提交请求
      */
     private void validateSubmitRequest(JudgeSubmitRequest req) {
-        String rawLanguage = req.getLanguage() == null ? "" : req.getLanguage().trim();
-        String language = rawLanguage.toLowerCase(Locale.ROOT);
-        boolean supported = supportedLanguages != null && supportedLanguages.stream()
-                .anyMatch(item -> item.equalsIgnoreCase(language));
-        Asserts.isTrue(supported, "不支持的编程语言：" + req.getLanguage());
-        req.setLanguage(language);
+        req.setLanguage(normalizeSupportedLanguage(req.getLanguage()));
 
         Result<ProblemBriefDTO> result;
         try {
@@ -259,6 +260,40 @@ public class JudgeService {
         ProblemBriefDTO brief = result.getData();
         Asserts.notNull(brief, "题目不存在");
         Asserts.isTrue(brief.getStatus() == null || brief.getStatus() != 0, "题目已下架，暂不可提交");
+    }
+
+    /**
+     * 语言白名单校验并归一化为小写（与沙箱 languages.toml 的 name 对齐）
+     * <p>
+     * 所有调用沙箱的入口都必须先经过这里：沙箱对未知语言直接返回 400，
+     * 若不提前拦截，调用方会把正常实例误判为故障并拉黑。
+     *
+     * @param language 原始语言
+     * @return 归一化后的语言
+     */
+    private String normalizeSupportedLanguage(String language) {
+        String normalized = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        boolean supported = supportedLanguages != null && supportedLanguages.stream()
+                .anyMatch(item -> item.equalsIgnoreCase(normalized));
+        Asserts.isTrue(supported, "不支持的编程语言：" + language);
+        return normalized;
+    }
+
+    /**
+     * 沙箱调用失败是否需要拉黑实例
+     * <p>
+     * 4xx（参数/语言/令牌错误）与 429/503（繁忙）说明实例健康，只是本次请求不合法或排队失败，
+     * 拉黑会让一次坏请求打掉正常实例；其余 5xx、网络超时、空响应才视为实例故障。
+     *
+     * @param e 沙箱调用异常
+     * @return true 需要拉黑
+     */
+    private boolean shouldBlacklist(Exception e) {
+        if (e instanceof WebClientResponseException responseException) {
+            int status = responseException.getStatusCode().value();
+            return !(status == 429 || status == 503 || (status >= 400 && status < 500));
+        }
+        return true;
     }
 
     /**
@@ -312,19 +347,24 @@ public class JudgeService {
         rateLimiter.trySetRate(org.redisson.api.RateType.OVERALL, 20, 1, org.redisson.api.RateIntervalUnit.MINUTES);
         Asserts.isTrue(rateLimiter.tryAcquire(), "运行过于频繁，请稍后再试");
 
+        // 先校验语言再占用沙箱：未知语言会让沙箱返回 400，不能把健康实例误判为故障
+        String language = normalizeSupportedLanguage(req.getLanguage());
+
         JudgeSandbox sandbox = selectAvailableSandbox();
         Asserts.notNull(sandbox, ResultCode.SANDBOX_UNAVAILABLE.getMessage());
 
         sandboxLoadStrategy.occupy(sandbox.getSandboxKey());
         try {
             SandboxRunResponse response = sandboxClient.run(sandbox.getBaseUrl(),
-                    new SandboxRunRequest(req.getLanguage(), req.getCode(), req.getInput(), 10000));
+                    new SandboxRunRequest(language, req.getCode(), req.getInput(), 10000));
             JudgeStatusEnum status = mapStatus(response.status());
             return new JudgeRunVO(status.getCode(), status.getDesc(),
                     response.output(), response.errorMessage(), response.timeMs(), response.memoryKb());
         } catch (Exception e) {
             log.error("自测运行沙箱调用失败 sandbox={}", sandbox.getSandboxKey(), e);
-            sandboxLoadStrategy.blacklist(sandbox.getSandboxKey());
+            if (shouldBlacklist(e)) {
+                sandboxLoadStrategy.blacklist(sandbox.getSandboxKey());
+            }
             throw new BizException(ResultCode.SANDBOX_UNAVAILABLE);
         } finally {
             sandboxLoadStrategy.release(sandbox.getSandboxKey());
@@ -378,11 +418,15 @@ public class JudgeService {
         rateLimiter.trySetRate(org.redisson.api.RateType.OVERALL, 10, 1, org.redisson.api.RateIntervalUnit.MINUTES);
         Asserts.isTrue(rateLimiter.tryAcquire(), "校验过于频繁，请稍后再试");
 
+        // 同 run：未知语言会让沙箱返回 400，先拦截避免把健康实例拉黑
+        String language = normalizeSupportedLanguage(req.getLanguage());
+
         JudgeSandbox sandbox = selectAvailableSandbox();
         Asserts.notNull(sandbox, ResultCode.SANDBOX_UNAVAILABLE.getMessage());
 
+        // 限时由用户指定，必须设上限：超大值会长期占用沙箱槽位
         int timeLimit = req.getTimeLimitMs() == null || req.getTimeLimitMs() <= 0
-                ? 10000 : req.getTimeLimitMs();
+                ? 10000 : Math.min(req.getTimeLimitMs(), MAX_VALIDATE_TIME_LIMIT_MS);
 
         CaseValidateVO vo = new CaseValidateVO();
         vo.setCompileOk(true);
@@ -397,7 +441,7 @@ public class JudgeService {
                 r.setExpectedOutput(item.getExpectedOutput());
                 try {
                     SandboxRunResponse resp = sandboxClient.run(sandbox.getBaseUrl(),
-                            new SandboxRunRequest(req.getLanguage(), req.getCode(), item.getInput(), timeLimit));
+                            new SandboxRunRequest(language, req.getCode(), item.getInput(), timeLimit));
                     JudgeStatusEnum status = mapStatus(resp.status());
                     r.setStatus(status.name());
                     r.setActualOutput(resp.output());
@@ -419,7 +463,9 @@ public class JudgeService {
                     }
                 } catch (Exception e) {
                     log.error("用例校验沙箱调用失败 seq={} sandbox={}", item.getSeq(), sandbox.getSandboxKey(), e);
-                    sandboxLoadStrategy.blacklist(sandbox.getSandboxKey());
+                    if (shouldBlacklist(e)) {
+                        sandboxLoadStrategy.blacklist(sandbox.getSandboxKey());
+                    }
                     throw new BizException(ResultCode.SANDBOX_UNAVAILABLE);
                 }
                 vo.getCases().add(r);
