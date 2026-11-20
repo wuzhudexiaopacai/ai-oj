@@ -71,6 +71,57 @@ class ProblemServiceImplTestCaseValidationTest {
         assertThrows(BizException.class, () -> problemService.validateTestCases(1L, null, 1));
     }
 
+    @Test
+    void missingInputCarrierShouldBeRejected() {
+        TestCaseSaveDTO dto = new TestCaseSaveDTO();
+        dto.setSeq(1);
+        dto.setOutputData("3");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> problemService.validateTestCases(null, List.of(dto), 1));
+        assertTrue(ex.getMessage().contains("用例输入不能为空"));
+    }
+
+    @Test
+    void missingOutputCarrierShouldBeRejected() {
+        TestCaseSaveDTO dto = new TestCaseSaveDTO();
+        dto.setSeq(1);
+        dto.setInputData("1 2");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> problemService.validateTestCases(null, List.of(dto), 1));
+        assertTrue(ex.getMessage().contains("用例输出不能为空"));
+    }
+
+    @Test
+    void fileCarrierShouldBeAccepted() {
+        TestCaseSaveDTO dto = new TestCaseSaveDTO();
+        dto.setSeq(1);
+        dto.setInputFile("files/md5/1.in");
+        dto.setOutputFile("files/md5/1.out");
+
+        assertDoesNotThrow(() -> problemService.validateTestCases(null, List.of(dto), 1));
+    }
+
+    @Test
+    void spjWithoutLanguageShouldBeRejected() {
+        BizException ex = assertThrows(BizException.class,
+                () -> problemService.validateSpj(1, null, "int main() {}"));
+        assertTrue(ex.getMessage().contains("必须指定 SPJ 语言"));
+    }
+
+    @Test
+    void spjWithoutCodeShouldBeRejected() {
+        BizException ex = assertThrows(BizException.class,
+                () -> problemService.validateSpj(1, "cpp", " "));
+        assertTrue(ex.getMessage().contains("必须提供 SPJ 代码"));
+    }
+
+    @Test
+    void spjDisabledShouldPass() {
+        assertDoesNotThrow(() -> problemService.validateSpj(0, null, null));
+    }
+
     private TestCaseSaveDTO caseOf(int seq) {
         TestCaseSaveDTO dto = new TestCaseSaveDTO();
         dto.setSeq(seq);

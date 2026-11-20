@@ -349,6 +349,7 @@ public class ProblemServiceImpl implements ProblemService {
     public Long create(ProblemSaveDTO saveDTO) {
         Integer effectiveStatus = saveDTO.getStatus() == null ? STATUS_ONLINE : saveDTO.getStatus();
         validateTestCases(null, saveDTO.getTestCases(), effectiveStatus);
+        validateSpj(saveDTO.getIsSpj(), saveDTO.getSpjLanguage(), saveDTO.getSpjCode());
         Long count = problemMapper.selectCount(new LambdaQueryWrapper<Problem>()
                 .eq(Problem::getProblemKey, saveDTO.getProblemKey()));
         Asserts.isTrue(count == 0, "题号已存在");
@@ -374,6 +375,7 @@ public class ProblemServiceImpl implements ProblemService {
         Integer effectiveStatus = saveDTO.getStatus() != null ? saveDTO.getStatus()
                 : (exist.getStatus() == null ? STATUS_ONLINE : exist.getStatus());
         validateTestCases(id, saveDTO.getTestCases(), effectiveStatus);
+        validateSpj(saveDTO.getIsSpj(), saveDTO.getSpjLanguage(), saveDTO.getSpjCode());
         Long count = problemMapper.selectCount(new LambdaQueryWrapper<Problem>()
                 .eq(Problem::getProblemKey, saveDTO.getProblemKey())
                 .ne(Problem::getId, id));
@@ -511,7 +513,29 @@ public class ProblemServiceImpl implements ProblemService {
             Asserts.notNull(testCase.getSeq(), "用例序号不能为空");
             Asserts.isTrue(testCase.getSeq() > 0, "用例序号必须为正整数");
             Asserts.isTrue(seqSet.add(testCase.getSeq()), "用例序号重复：" + testCase.getSeq());
+            // 与单条用例接口同一规则：空输入/空期望输出会让判题把任意代码判对，必须在保存时拦截
+            Asserts.isTrue(StrUtil.isNotBlank(testCase.getInputData())
+                            || StrUtil.isNotBlank(testCase.getInputFile()),
+                    "用例输入不能为空（seq=" + testCase.getSeq() + "）");
+            Asserts.isTrue(StrUtil.isNotBlank(testCase.getOutputData())
+                            || StrUtil.isNotBlank(testCase.getOutputFile()),
+                    "用例输出不能为空（seq=" + testCase.getSeq() + "）");
         }
+    }
+
+    /**
+     * 特殊判题配置校验：开启 SPJ 时必须同时提供语言与代码，否则该题所有提交都会因 SJ 编译失败而异常
+     *
+     * @param isSpj       是否特殊判题：0否 1是
+     * @param spjLanguage SPJ 语言
+     * @param spjCode     SPJ 代码
+     */
+    void validateSpj(Integer isSpj, String spjLanguage, String spjCode) {
+        if (!Integer.valueOf(1).equals(isSpj)) {
+            return;
+        }
+        Asserts.notBlank(spjLanguage, "开启特殊判题时必须指定 SPJ 语言");
+        Asserts.notBlank(spjCode, "开启特殊判题时必须提供 SPJ 代码");
     }
 
     /**
