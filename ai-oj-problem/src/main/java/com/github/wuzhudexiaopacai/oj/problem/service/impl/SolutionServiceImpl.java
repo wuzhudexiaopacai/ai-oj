@@ -14,15 +14,18 @@ import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
 import com.github.wuzhudexiaopacai.oj.problem.dto.SolutionSaveDTO;
 import com.github.wuzhudexiaopacai.oj.problem.entity.Problem;
 import com.github.wuzhudexiaopacai.oj.problem.entity.Solution;
+import com.github.wuzhudexiaopacai.oj.problem.entity.SolutionLike;
 import com.github.wuzhudexiaopacai.oj.problem.mapper.ProblemMapper;
+import com.github.wuzhudexiaopacai.oj.problem.mapper.SolutionLikeMapper;
 import com.github.wuzhudexiaopacai.oj.problem.mapper.SolutionMapper;
 import com.github.wuzhudexiaopacai.oj.problem.service.SolutionService;
 import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionLikeVO;
 import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,14 +52,9 @@ public class SolutionServiceImpl implements SolutionService {
      */
     private static final int STATUS_NORMAL = 1;
 
-    /**
-     * 题解点赞用户集合 Redis Key 前缀
-     */
-    private static final String LIKE_KEY_PREFIX = "oj:solution:like:";
-
     private final SolutionMapper solutionMapper;
     private final ProblemMapper problemMapper;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final SolutionLikeMapper solutionLikeMapper;
     private final AuthFeignClient authFeignClient;
 
     @Override
@@ -69,9 +67,10 @@ public class SolutionServiceImpl implements SolutionService {
                         .orderByDesc(Solution::getLikeCount)
                         .orderByDesc(Solution::getCreateTime));
         Map<Long, String> authorNames = loadAuthorNames(page.getRecords());
-        Long currentUserId = SecurityUtils.currentUserIdOrNull();
+        Set<Long> likedIds = likedSolutionIds(SecurityUtils.currentUserIdOrNull(),
+                page.getRecords().stream().map(Solution::getId).toList());
         return PageResult.of(page, solution -> {
-            SolutionVO vo = toVO(solution, authorNames, currentUserId);
+            SolutionVO vo = toVO(solution, authorNames, likedIds.contains(solution.getId()));
             // 列表不返回正文，减小报文
             vo.setContent(null);
             return vo;
@@ -83,7 +82,8 @@ public class SolutionServiceImpl implements SolutionService {
         Solution solution = solutionMapper.selectById(id);
         Asserts.notNull(solution, "题解不存在");
         Asserts.isTrue(solution.getStatus() == STATUS_NORMAL, "题解待审核中");
-        return toVO(solution, loadAuthorNames(List.of(solution)), SecurityUtils.currentUserIdOrNull());
+        return toVO(solution, loadAuthorNames(List.of(solution)),
+                isLiked(id, SecurityUtils.currentUserIdOrNull()));
     }
 
     @Override
@@ -99,6 +99,7 @@ public class SolutionServiceImpl implements SolutionService {
         return solution.getId();
     }
 
+    @Transactional(rollbackFor = Exception.class)
     @Override
     public SolutionLikeVO toggleLike(Long id) {
         LoginUser loginUser = SecurityUtils.requireLogin();
@@ -107,33 +108,36 @@ public class SolutionServiceImpl implements SolutionService {
         Asserts.isTrue(solution.getStatus() == STATUS_NORMAL, "题解待审核中");
 
         int base = solution.getLikeCount() == null ? 0 : solution.getLikeCount();
-        String key = LIKE_KEY_PREFIX + id;
-        String member = loginUser.getId().toString();
-        Boolean liked = stringRedisTemplate.opsForSet().isMember(key, member);
+        Long userId = loginUser.getId();
         boolean nowLiked;
         int count;
-        if (Boolean.TRUE.equals(liked)) {
-            // remove 返回实际移除数量；并发重复取消时只有真正移除的那次才减计数
-            Long removed = stringRedisTemplate.opsForSet().remove(key, member);
+        if (isLiked(id, userId)) {
+            // 删除返回实际移除行数；并发重复取消时只有真正删除的那次才减计数
+            int removed = solutionLikeMapper.delete(new LambdaQueryWrapper<SolutionLike>()
+                    .eq(SolutionLike::getSolutionId, id)
+                    .eq(SolutionLike::getUserId, userId));
             nowLiked = false;
-            if (removed != null && removed > 0) {
+            if (removed > 0) {
                 updateLikeCount(id, -1);
                 count = Math.max(0, base - 1);
             } else {
                 count = base;
             }
         } else {
-            // add 返回 1 表示本次真正新增；并发重复点赞（返回 0）不再重复计数
-            Long added = stringRedisTemplate.opsForSet().add(key, member);
+            SolutionLike like = new SolutionLike();
+            like.setSolutionId(id);
+            like.setUserId(userId);
             nowLiked = true;
-            if (added != null && added > 0) {
+            try {
+                solutionLikeMapper.insert(like);
                 updateLikeCount(id, 1);
                 count = base + 1;
-            } else {
+            } catch (DuplicateKeyException e) {
+                // 唯一键兜底并发重复点赞：本次未真正新增，不重复计数
                 count = base;
             }
         }
-        log.info("题解点赞切换 solutionId={} userId={} liked={} likeCount={}", id, loginUser.getId(), nowLiked, count);
+        log.info("题解点赞切换 solutionId={} userId={} liked={} likeCount={}", id, userId, nowLiked, count);
         return new SolutionLikeVO(nowLiked, count);
     }
 
@@ -152,10 +156,10 @@ public class SolutionServiceImpl implements SolutionService {
                 .setSql(sql));
     }
 
-    private SolutionVO toVO(Solution solution, Map<Long, String> authorNames, Long currentUserId) {
+    private SolutionVO toVO(Solution solution, Map<Long, String> authorNames, boolean liked) {
         SolutionVO vo = BeanUtil.copyProperties(solution, SolutionVO.class);
         vo.setAuthorName(authorNames.get(solution.getUserId()));
-        vo.setLiked(isLiked(solution.getId(), currentUserId));
+        vo.setLiked(liked);
         return vo;
     }
 
@@ -163,8 +167,25 @@ public class SolutionServiceImpl implements SolutionService {
         if (currentUserId == null) {
             return false;
         }
-        return Boolean.TRUE.equals(stringRedisTemplate.opsForSet()
-                .isMember(LIKE_KEY_PREFIX + solutionId, currentUserId.toString()));
+        Long count = solutionLikeMapper.selectCount(new LambdaQueryWrapper<SolutionLike>()
+                .eq(SolutionLike::getSolutionId, solutionId)
+                .eq(SolutionLike::getUserId, currentUserId));
+        return count != null && count > 0;
+    }
+
+    /**
+     * 批量查询当前用户已点赞的题解 ID，避免列表逐条查询
+     */
+    private Set<Long> likedSolutionIds(Long currentUserId, List<Long> solutionIds) {
+        if (currentUserId == null || solutionIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return solutionLikeMapper.selectList(new LambdaQueryWrapper<SolutionLike>()
+                        .eq(SolutionLike::getUserId, currentUserId)
+                        .in(SolutionLike::getSolutionId, solutionIds))
+                .stream()
+                .map(SolutionLike::getSolutionId)
+                .collect(Collectors.toSet());
     }
 
     /**

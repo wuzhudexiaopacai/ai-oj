@@ -1,11 +1,14 @@
 package com.github.wuzhudexiaopacai.oj.problem.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.github.wuzhudexiaopacai.oj.api.dto.UserBriefDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.AuthFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.problem.entity.Solution;
+import com.github.wuzhudexiaopacai.oj.problem.entity.SolutionLike;
 import com.github.wuzhudexiaopacai.oj.problem.mapper.ProblemMapper;
+import com.github.wuzhudexiaopacai.oj.problem.mapper.SolutionLikeMapper;
 import com.github.wuzhudexiaopacai.oj.problem.mapper.SolutionMapper;
 import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionLikeVO;
 import com.github.wuzhudexiaopacai.oj.problem.vo.SolutionVO;
@@ -15,8 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.SetOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -28,7 +30,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,9 +43,6 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SolutionServiceImplTest {
 
-    private static final String LIKE_KEY = "oj:solution:like:1";
-    private static final String USER_ID = "1001";
-
     @Mock
     private SolutionMapper solutionMapper;
 
@@ -52,10 +50,7 @@ class SolutionServiceImplTest {
     private ProblemMapper problemMapper;
 
     @Mock
-    private StringRedisTemplate stringRedisTemplate;
-
-    @Mock
-    private SetOperations<String, String> setOperations;
+    private SolutionLikeMapper solutionLikeMapper;
 
     @Mock
     private AuthFeignClient authFeignClient;
@@ -89,61 +84,60 @@ class SolutionServiceImplTest {
     @Test
     void toggleLikeShouldAddWhenNotLiked() {
         login();
-        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
         when(solutionMapper.selectById(1L)).thenReturn(solution(5));
-        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(false);
-        when(setOperations.add(LIKE_KEY, USER_ID)).thenReturn(1L);
+        when(solutionLikeMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(solutionLikeMapper.insert(any(SolutionLike.class))).thenReturn(1);
 
         SolutionLikeVO result = solutionService.toggleLike(1L);
 
         assertTrue(result.getLiked());
         assertEquals(6, result.getLikeCount());
+        verify(solutionLikeMapper).insert(any(SolutionLike.class));
         verify(solutionMapper).update(isNull(), any());
     }
 
     @Test
     void toggleLikeShouldRemoveWhenAlreadyLiked() {
         login();
-        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
         when(solutionMapper.selectById(1L)).thenReturn(solution(5));
-        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(true);
-        when(setOperations.remove(LIKE_KEY, USER_ID)).thenReturn(1L);
+        when(solutionLikeMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
+        when(solutionLikeMapper.delete(any(Wrapper.class))).thenReturn(1);
 
         SolutionLikeVO result = solutionService.toggleLike(1L);
 
         assertEquals(false, result.getLiked());
         assertEquals(4, result.getLikeCount());
-        verify(setOperations).remove(LIKE_KEY, USER_ID);
+        verify(solutionLikeMapper).delete(any(Wrapper.class));
         verify(solutionMapper).update(isNull(), any());
-    }
-
-    @Test
-    void toggleLikeShouldNotDoubleDecrementConcurrentRemove() {
-        login();
-        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
-        when(solutionMapper.selectById(1L)).thenReturn(solution(5));
-        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(true);
-        // 并发重复取消：本次未真正移除，不应再减计数
-        when(setOperations.remove(LIKE_KEY, USER_ID)).thenReturn(0L);
-
-        SolutionLikeVO result = solutionService.toggleLike(1L);
-
-        assertEquals(false, result.getLiked());
-        assertEquals(5, result.getLikeCount());
-        verify(solutionMapper, never()).update(isNull(), any());
     }
 
     @Test
     void toggleLikeShouldNotDoubleCountConcurrentAdd() {
         login();
-        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
         when(solutionMapper.selectById(1L)).thenReturn(solution(5));
-        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(false);
-        when(setOperations.add(LIKE_KEY, USER_ID)).thenReturn(0L);
+        when(solutionLikeMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        // 唯一键兜底：并发重复点赞时插入冲突，本次不重复计数
+        when(solutionLikeMapper.insert(any(SolutionLike.class)))
+                .thenThrow(new DuplicateKeyException("uk_solution_user"));
 
         SolutionLikeVO result = solutionService.toggleLike(1L);
 
         assertTrue(result.getLiked());
+        assertEquals(5, result.getLikeCount());
+        verify(solutionMapper, never()).update(isNull(), any());
+    }
+
+    @Test
+    void toggleLikeShouldNotDoubleDecrementConcurrentRemove() {
+        login();
+        when(solutionMapper.selectById(1L)).thenReturn(solution(5));
+        when(solutionLikeMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
+        // 并发重复取消：本次未真正删除，不应再减计数
+        when(solutionLikeMapper.delete(any(Wrapper.class))).thenReturn(0);
+
+        SolutionLikeVO result = solutionService.toggleLike(1L);
+
+        assertEquals(false, result.getLiked());
         assertEquals(5, result.getLikeCount());
         verify(solutionMapper, never()).update(isNull(), any());
     }
@@ -160,9 +154,8 @@ class SolutionServiceImplTest {
     @Test
     void detailShouldFillAuthorNameAndLiked() {
         login();
-        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
         when(solutionMapper.selectById(1L)).thenReturn(solution(5));
-        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(true);
+        when(solutionLikeMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
         UserBriefDTO brief = new UserBriefDTO();
         brief.setId(1001L);
         brief.setNickname("Alice");
@@ -178,9 +171,8 @@ class SolutionServiceImplTest {
     @Test
     void detailShouldDegradeAuthorNameWhenFeignFails() {
         login();
-        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
         when(solutionMapper.selectById(1L)).thenReturn(solution(5));
-        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(false);
+        when(solutionLikeMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(authFeignClient.batchGetUserBrief(any())).thenThrow(new RuntimeException("auth down"));
 
         SolutionVO detail = solutionService.detail(1L);

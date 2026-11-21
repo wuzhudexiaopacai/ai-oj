@@ -158,6 +158,20 @@ CREATE TABLE pms_solution (
     KEY idx_problem (problem_id)
 ) ENGINE = InnoDB COMMENT '题解表';
 
+-- -----------------------------
+-- 题解点赞关系表（物理删除，唯一键防重复点赞）
+-- -----------------------------
+DROP TABLE IF EXISTS pms_solution_like;
+CREATE TABLE pms_solution_like (
+    id          BIGINT   NOT NULL,
+    solution_id BIGINT   NOT NULL,
+    user_id     BIGINT   NOT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_solution_user (solution_id, user_id),
+    KEY idx_user (user_id)
+) ENGINE = InnoDB COMMENT '题解点赞关系表';
+
 -- ============================= 种子数据 =============================
 -- 标签分类
 INSERT INTO pms_tag_category (id, name, sort) VALUES
