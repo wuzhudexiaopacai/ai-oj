@@ -53,6 +53,13 @@ fn truncate_log(log: &mut String) -> bool {
     true
 }
 
+/// Docker 的 name 过滤器是部分匹配，删除前必须确认完整名称属于本实例前缀
+fn has_managed_container_name(names: &[String], prefix: &str) -> bool {
+    names
+        .iter()
+        .any(|name| name.trim_start_matches('/').starts_with(prefix))
+}
+
 #[derive(Clone)]
 pub struct DockerManager {
     docker: Docker,
@@ -293,6 +300,15 @@ impl DockerManager {
         {
             Ok(list) => {
                 for c in list {
+                    if !c
+                        .names
+                        .as_deref()
+                        .is_some_and(|names| {
+                            has_managed_container_name(names, &self.container_prefix)
+                        })
+                    {
+                        continue;
+                    }
                     if let Some(id) = c.id {
                         info!(container = %id, "清理残留沙箱容器");
                         let _ = self
@@ -332,7 +348,9 @@ fn validate_task_id(task_id: &str) -> Result<(), SandboxError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{truncate_log, validate_task_id, MAX_LOG_BYTES};
+    use super::{
+        has_managed_container_name, truncate_log, validate_task_id, MAX_LOG_BYTES,
+    };
 
     #[test]
     fn uuid_task_id_should_pass() {
@@ -368,5 +386,20 @@ mod tests {
 
         assert!(!truncate_log(&mut log));
         assert_eq!(log.len(), MAX_LOG_BYTES);
+    }
+
+    #[test]
+    fn stale_cleanup_should_only_match_prefixed_container_names() {
+        let prefix = "ai-oj-sandbox-";
+
+        assert!(has_managed_container_name(
+            &["/ai-oj-sandbox-task-1-compile".to_string()],
+            prefix
+        ));
+        assert!(!has_managed_container_name(
+            &["/other-ai-oj-sandbox-task-1-compile".to_string()],
+            prefix
+        ));
+        assert!(!has_managed_container_name(&[], prefix));
     }
 }
