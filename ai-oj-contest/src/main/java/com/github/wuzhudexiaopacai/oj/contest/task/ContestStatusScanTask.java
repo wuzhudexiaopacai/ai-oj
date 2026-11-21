@@ -17,7 +17,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -50,6 +52,12 @@ public class ContestStatusScanTask {
     private static final int SCAN_BATCH_LIMIT = 100;
 
     /**
+     * RocketMQ 固定延时级别（1~18 级）对应的秒数，用于结算宽限期换算
+     */
+    private static final int[] DELAY_LEVEL_SECONDS =
+            {1, 5, 10, 30, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 1200, 1800, 3600, 7200};
+
+    /**
      * 事件类型：开赛
      */
     private static final String EVENT_START = "start";
@@ -72,6 +80,13 @@ public class ContestStatusScanTask {
     private final ContestWsPushService wsPushService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 结算宽限期（秒）：比赛结束后延迟投递 end 事件，让截止前已提交但仍在排队/判题的提交先落库，
+     * 避免最终榜单漏掉这些成绩；0 表示不延迟
+     */
+    @Value("${ai-oj.contest.settle-grace-seconds:300}")
+    private long settleGraceSeconds;
 
     /**
      * 定时扫描（间隔取配置 ai-oj.contest.status-scan-interval-ms，默认 5s）
@@ -145,11 +160,37 @@ public class ContestStatusScanTask {
         message.setContestType(contest.getType());
         message.setTimestamp(System.currentTimeMillis());
         try {
-            rocketMQTemplate.syncSend(MqConstants.CONTEST_EVENT_TOPIC + ":" + eventType,
-                    objectMapper.writeValueAsString(message));
+            String destination = MqConstants.CONTEST_EVENT_TOPIC + ":" + eventType;
+            String payload = objectMapper.writeValueAsString(message);
+            // 结束事件延迟投递，给在途判题留出落库时间；开赛事件保持实时
+            int delayLevel = EVENT_END.equals(eventType) ? delayLevelOf(settleGraceSeconds) : 0;
+            if (delayLevel > 0) {
+                rocketMQTemplate.syncSend(destination, MessageBuilder.withPayload(payload).build(),
+                        5000, delayLevel);
+            } else {
+                rocketMQTemplate.syncSend(destination, payload);
+            }
         } catch (Exception e) {
             // 消息发送失败不阻断状态迁移（状态已落库，事件丢失由 judge 侧兜底/人工补偿）
             log.error("比赛事件消息发送失败 contestId={} eventType={}", contest.getId(), eventType, e);
         }
+    }
+
+    /**
+     * 秒 → RocketMQ 延时级别（向上取整）；0 表示不延迟，超过最大级别按最大级别
+     *
+     * @param delaySeconds 延迟秒数
+     * @return 延时级别（0~18）
+     */
+    static int delayLevelOf(long delaySeconds) {
+        if (delaySeconds <= 0) {
+            return 0;
+        }
+        for (int i = 0; i < DELAY_LEVEL_SECONDS.length; i++) {
+            if (delaySeconds <= DELAY_LEVEL_SECONDS[i]) {
+                return i + 1;
+            }
+        }
+        return DELAY_LEVEL_SECONDS.length;
     }
 }
