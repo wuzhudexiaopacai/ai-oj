@@ -41,6 +41,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -85,6 +86,8 @@ public class JudgeService {
     private final ContestFeignClient contestFeignClient;
 
     private final ProblemFeignClient problemFeignClient;
+
+    private final StringRedisTemplate stringRedisTemplate;
 
     /**
      * 允许提交的编程语言白名单，需与沙箱 languages.toml 的 name 保持一致
@@ -209,6 +212,9 @@ public class JudgeService {
                 .eq(JudgeCaseResult::getSubmissionId, submissionId));
         judgeOutboxMapper.delete(new LambdaQueryWrapper<JudgeOutbox>()
                 .eq(JudgeOutbox::getSubmitId, submission.getSubmitId()));
+        // 清掉上一轮进度缓存：否则 WebSocket 断线的用户轮询会一直拿到旧终态，误以为重判已完成
+        stringRedisTemplate.delete(
+                RedisKeys.JUDGE_PROGRESS + submission.getUserId() + ":" + submission.getSubmitId());
 
         JudgeSubmitMessage message = JudgeSubmitMessage.builder()
                 .submitId(submission.getSubmitId())

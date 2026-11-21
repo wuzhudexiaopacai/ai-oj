@@ -38,6 +38,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RedissonClient;
 import org.springframework.http.HttpHeaders;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.messaging.Message;
@@ -99,6 +100,9 @@ class JudgeServiceTest {
 
     @Mock
     private ProblemFeignClient problemFeignClient;
+
+    @Mock
+    private StringRedisTemplate stringRedisTemplate;
 
     @Mock
     private RRateLimiter rateLimiter;
@@ -176,6 +180,7 @@ class JudgeServiceTest {
         JudgeSubmission submission = new JudgeSubmission();
         submission.setId(1L);
         submission.setSubmitId("submit-1");
+        submission.setUserId(7L);
         submission.setStatus(JudgeStatusEnum.WRONG_ANSWER.getCode());
         when(judgeSubmissionMapper.selectById(1L)).thenReturn(submission);
 
@@ -300,6 +305,20 @@ class JudgeServiceTest {
         assertTrue(vo.getCases().get(0).getPassed());
         assertEquals(1, vo.getPassedCount().intValue());
         assertTrue(vo.getOverallPassed());
+    }
+
+    @Test
+    void rejudgeShouldClearStaleProgressCache() {
+        JudgeSubmission submission = new JudgeSubmission();
+        submission.setId(1L);
+        submission.setSubmitId("submit-1");
+        submission.setUserId(7L);
+        submission.setStatus(JudgeStatusEnum.ACCEPTED.getCode());
+        when(judgeSubmissionMapper.selectById(1L)).thenReturn(submission);
+
+        judgeService.rejudge(1L);
+
+        verify(stringRedisTemplate).delete("judge:progress:7:submit-1");
     }
 
     private CaseValidateRequest validateRequestOf(String expectedOutput) {
