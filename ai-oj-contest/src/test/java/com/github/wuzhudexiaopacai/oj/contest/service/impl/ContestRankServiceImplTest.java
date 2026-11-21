@@ -95,13 +95,18 @@ class ContestRankServiceImplTest {
     }
 
     private ContestRecordDTO recordOf(Long userId, Integer totalScore, Integer rankSnapshot) {
+        return recordOf(userId, totalScore, 1, 0L, rankSnapshot);
+    }
+
+    private ContestRecordDTO recordOf(Long userId, Integer totalScore, Integer acceptCount,
+                                      Long penaltySeconds, Integer rankSnapshot) {
         ContestRecordDTO record = new ContestRecordDTO();
         record.setContestId(1L);
         record.setUserId(userId);
         record.setUsername("user" + userId);
         record.setTotalScore(totalScore);
-        record.setAcceptCount(1);
-        record.setPenaltySeconds(0L);
+        record.setAcceptCount(acceptCount);
+        record.setPenaltySeconds(penaltySeconds);
         record.setRankSnapshot(rankSnapshot);
         return record;
     }
@@ -110,7 +115,7 @@ class ContestRankServiceImplTest {
     void sealedRankPrefersRedisSnapshot() {
         when(contestMapper.selectById(1L)).thenReturn(contestOf(0, true));
         List<ContestRecordDTO> snapshot = List.of(
-                recordOf(2L, 100, null), recordOf(1L, 90, null));
+                recordOf(2L, 200, 2, 100L, null), recordOf(1L, 100, 1, 50L, null));
         when(valueOperations.get(anyString())).thenReturn(snapshot);
 
         List<ContestRankVO> ranks = rankService.rank(1L);
@@ -119,6 +124,38 @@ class ContestRankServiceImplTest {
         assertEquals(1, ranks.get(0).getRank());
         assertEquals(2L, ranks.get(0).getUserId());
         verify(judgeFeignClient, never()).listContestRecord(anyLong());
+    }
+
+    @Test
+    void acmRankSharesRankWhenAcceptAndPenaltyEqual() {
+        when(contestMapper.selectById(1L)).thenReturn(contestOf(0, false));
+        ContestRecordDTO first = recordOf(1L, 200, 2, 100L, null);
+        ContestRecordDTO second = recordOf(2L, 200, 2, 100L, null);
+        ContestRecordDTO third = recordOf(3L, 100, 1, 50L, null);
+        doReturn(Result.ok(List.of(first, second, third))).when(judgeFeignClient).listContestRecord(1L);
+        RankingStrategy strategy = mock(RankingStrategy.class);
+        when(rankingStrategyFactory.getStrategy(0)).thenReturn(strategy);
+        when(strategy.sort(anyList())).thenReturn(List.of(first, second, third));
+
+        List<ContestRankVO> ranks = rankService.rank(1L);
+
+        assertEquals(List.of(1, 1, 3), ranks.stream().map(ContestRankVO::getRank).toList());
+    }
+
+    @Test
+    void oiRankSharesRankWhenTotalScoreEqual() {
+        when(contestMapper.selectById(1L)).thenReturn(contestOf(1, false));
+        ContestRecordDTO first = recordOf(1L, 100, 2, 0L, null);
+        ContestRecordDTO second = recordOf(2L, 100, 2, 0L, null);
+        ContestRecordDTO third = recordOf(3L, 90, 1, 0L, null);
+        doReturn(Result.ok(List.of(first, second, third))).when(judgeFeignClient).listContestRecord(1L);
+        RankingStrategy strategy = mock(RankingStrategy.class);
+        when(rankingStrategyFactory.getStrategy(1)).thenReturn(strategy);
+        when(strategy.sort(anyList())).thenReturn(List.of(first, second, third));
+
+        List<ContestRankVO> ranks = rankService.rank(1L);
+
+        assertEquals(List.of(1, 1, 3), ranks.stream().map(ContestRankVO::getRank).toList());
     }
 
     @Test

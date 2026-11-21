@@ -62,12 +62,21 @@ public class ContestEventConsumer implements RocketMQListener<ContestEventConsum
                 .thenComparingLong(ContestRecord::getPenaltySeconds);
         List<ContestRecord> sorted = records.stream().sorted(comparator).toList();
 
-        int rank = 1;
+        // 并列名次：OI 同总分并列，ACM 同通过题数且同罚时并列，并列后下一名跳号（1、1、3）
+        int rank = 0;
+        int position = 0;
+        ContestRecord previous = null;
         for (ContestRecord record : sorted) {
+            position++;
+            if (previous == null || !sameRank(previous, record, isOi)) {
+                rank = position;
+            }
+            record.setRankSnapshot(rank);
             ContestRecord update = new ContestRecord();
             update.setId(record.getId());
-            update.setRankSnapshot(rank++);
+            update.setRankSnapshot(rank);
             contestRecordMapper.updateById(update);
+            previous = record;
         }
         log.info("比赛 {} rank_snapshot 结算完成，共 {} 人", contestId, sorted.size());
 
@@ -80,10 +89,30 @@ public class ContestEventConsumer implements RocketMQListener<ContestEventConsum
             dto.setTotalScore(record.getTotalScore());
             dto.setAcceptCount(record.getAcceptCount());
             dto.setPenaltySeconds(record.getPenaltySeconds());
+            dto.setRankSnapshot(record.getRankSnapshot());
             return dto;
         }).toList();
         redisTemplate.opsForValue().set(RedisKeys.CONTEST_RANK + contestId, snapshot);
         log.info("比赛 {} 封榜快照已写入 Redis，共 {} 人", contestId, snapshot.size());
+    }
+
+    /**
+     * 两条成绩是否应并列同一名次：OI 比较总分，ACM 比较通过题数与罚时
+     */
+    private boolean sameRank(ContestRecord previous, ContestRecord current, boolean isOi) {
+        if (isOi) {
+            return nvl(previous.getTotalScore()) == nvl(current.getTotalScore());
+        }
+        return nvl(previous.getAcceptCount()) == nvl(current.getAcceptCount())
+                && nvl(previous.getPenaltySeconds()) == nvl(current.getPenaltySeconds());
+    }
+
+    private int nvl(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private long nvl(Long value) {
+        return value == null ? 0L : value;
     }
 
     /**

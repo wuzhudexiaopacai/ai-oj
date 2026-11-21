@@ -61,6 +61,7 @@ public class ContestRankServiceImpl implements ContestRankService {
     public List<ContestRankVO> rank(Long contestId) {
         Contest contest = contestMapper.selectById(contestId);
         Asserts.notNull(contest, "比赛不存在");
+        boolean oi = Integer.valueOf(1).equals(contest.getType());
         LoginUser loginUser = SecurityUtils.currentUser();
         boolean admin = loginUser != null && loginUser.hasAuthority(AUTHORITY_CONTEST_MANAGE);
         boolean sealed = contest.getSealTime() != null && !LocalDateTime.now().isBefore(contest.getSealTime());
@@ -73,19 +74,19 @@ public class ContestRankServiceImpl implements ContestRankService {
                         .map(ContestRecordDTO.class::cast)
                         .toList();
                 if (!records.isEmpty()) {
-                    return buildRankFromRecords(records);
+                    return buildRankFromRecords(records, oi);
                 }
             }
             // Redis 快照丢失（如重启/过期）时回读 DB 结算名次，避免封榜后向普通用户泄露实时榜单
             List<ContestRecordDTO> settled = loadSettledRecords(contestId);
             if (!settled.isEmpty()) {
                 log.info("封榜快照缺失，已回读 rank_snapshot 兜底 contestId={} count={}", contestId, settled.size());
-                return buildRankFromRecords(settled);
+                return buildRankFromRecords(settled, oi);
             }
             log.warn("比赛已封榜但排行榜快照缺失，降级为实时查询 contestId={}", contestId);
         }
         // 实时榜每次从成绩源重建：增量 ZSet 会漏掉未增量写入/缓存过期的用户，导致榜单人数不全
-        return rebuildRank(contest);
+        return rebuildRank(contest, oi);
     }
 
     /**
@@ -115,7 +116,7 @@ public class ContestRankServiceImpl implements ContestRankService {
      * <p>
      * judge 侧只返回比赛期间有提交记录的用户，未参赛的报名者不会出现在榜单中。
      */
-    private List<ContestRankVO> rebuildRank(Contest contest) {
+    private List<ContestRankVO> rebuildRank(Contest contest, boolean oi) {
         Result<List<ContestRecordDTO>> result = judgeFeignClient.listContestRecord(contest.getId());
         if (result == null || !result.isSuccess() || result.getData() == null) {
             throw new BizException("比赛成绩服务暂不可用，请稍后重试");
@@ -125,27 +126,52 @@ public class ContestRankServiceImpl implements ContestRankService {
             return Collections.emptyList();
         }
         RankingStrategy strategy = rankingStrategyFactory.getStrategy(contest.getType());
-        return buildRankFromRecords(strategy.sort(records));
+        return buildRankFromRecords(strategy.sort(records), oi);
     }
 
     /**
      * 从有序成绩记录构建排行榜 VO（实时重建与封榜快照共用）
+     * <p>
+     * 名次按赛制并列：OI 同总分并列，ACM 同通过题数且同罚时并列；
+     * 并列后下一名跳号（1、1、3），与主流 OJ 排行榜一致。
+     *
+     * @param sorted 已按赛制排序的成绩记录
+     * @param oi     是否 OI 赛制
+     * @return 排行榜
      */
-    private List<ContestRankVO> buildRankFromRecords(List<ContestRecordDTO> sorted) {
+    private List<ContestRankVO> buildRankFromRecords(List<ContestRecordDTO> sorted, boolean oi) {
         List<ContestRankVO> ranks = new ArrayList<>(sorted.size());
         int rankNo = 0;
+        int position = 0;
+        ContestRecordDTO previous = null;
         for (ContestRecordDTO record : sorted) {
+            position++;
+            if (previous == null || !sameRank(previous, record, oi)) {
+                rankNo = position;
+            }
             ContestRankVO vo = new ContestRankVO();
-            vo.setRank(++rankNo);
+            vo.setRank(rankNo);
             vo.setUserId(record.getUserId());
             vo.setUsername(record.getUsername());
             vo.setAcceptCount(nullToZero(record.getAcceptCount()));
             vo.setPenaltySeconds(nullToZero(record.getPenaltySeconds()));
             vo.setTotalScore(nullToZero(record.getTotalScore()));
             ranks.add(vo);
+            previous = record;
         }
         fillUserBrief(ranks);
         return ranks;
+    }
+
+    /**
+     * 两条成绩是否应并列同一名次：OI 比较总分，ACM 比较通过题数与罚时
+     */
+    private boolean sameRank(ContestRecordDTO previous, ContestRecordDTO current, boolean oi) {
+        if (oi) {
+            return nullToZero(previous.getTotalScore()) == nullToZero(current.getTotalScore());
+        }
+        return nullToZero(previous.getAcceptCount()) == nullToZero(current.getAcceptCount())
+                && nullToZero(previous.getPenaltySeconds()) == nullToZero(current.getPenaltySeconds());
     }
 
     /**
