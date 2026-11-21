@@ -113,10 +113,15 @@ public class SolutionServiceImpl implements SolutionService {
         boolean nowLiked;
         int count;
         if (Boolean.TRUE.equals(liked)) {
-            stringRedisTemplate.opsForSet().remove(key, member);
-            updateLikeCount(id, -1);
+            // remove 返回实际移除数量；并发重复取消时只有真正移除的那次才减计数
+            Long removed = stringRedisTemplate.opsForSet().remove(key, member);
             nowLiked = false;
-            count = Math.max(0, base - 1);
+            if (removed != null && removed > 0) {
+                updateLikeCount(id, -1);
+                count = Math.max(0, base - 1);
+            } else {
+                count = base;
+            }
         } else {
             // add 返回 1 表示本次真正新增；并发重复点赞（返回 0）不再重复计数
             Long added = stringRedisTemplate.opsForSet().add(key, member);

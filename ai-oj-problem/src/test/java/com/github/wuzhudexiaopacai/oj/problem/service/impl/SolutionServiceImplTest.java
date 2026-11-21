@@ -107,6 +107,7 @@ class SolutionServiceImplTest {
         lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
         when(solutionMapper.selectById(1L)).thenReturn(solution(5));
         when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(true);
+        when(setOperations.remove(LIKE_KEY, USER_ID)).thenReturn(1L);
 
         SolutionLikeVO result = solutionService.toggleLike(1L);
 
@@ -114,6 +115,22 @@ class SolutionServiceImplTest {
         assertEquals(4, result.getLikeCount());
         verify(setOperations).remove(LIKE_KEY, USER_ID);
         verify(solutionMapper).update(isNull(), any());
+    }
+
+    @Test
+    void toggleLikeShouldNotDoubleDecrementConcurrentRemove() {
+        login();
+        lenient().when(stringRedisTemplate.opsForSet()).thenReturn(setOperations);
+        when(solutionMapper.selectById(1L)).thenReturn(solution(5));
+        when(setOperations.isMember(LIKE_KEY, USER_ID)).thenReturn(true);
+        // 并发重复取消：本次未真正移除，不应再减计数
+        when(setOperations.remove(LIKE_KEY, USER_ID)).thenReturn(0L);
+
+        SolutionLikeVO result = solutionService.toggleLike(1L);
+
+        assertEquals(false, result.getLiked());
+        assertEquals(5, result.getLikeCount());
+        verify(solutionMapper, never()).update(isNull(), any());
     }
 
     @Test
