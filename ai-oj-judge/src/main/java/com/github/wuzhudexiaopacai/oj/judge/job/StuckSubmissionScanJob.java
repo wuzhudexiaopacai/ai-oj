@@ -78,12 +78,13 @@ public class StuckSubmissionScanJob extends QuartzJobBean {
                             5000);
                     log.info("卡死提交 {} 重新投递 retryCount={}", submission.getSubmitId(), submission.getRetryCount());
                 } else {
-                    // 超过重试上限：置 SYSTEM_ERROR 并广播结果消息
-                    stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
-                            "判题卡死超过重试上限，由补偿任务置为系统错误");
-                    submission.setStatus(JudgeStatusEnum.SYSTEM_ERROR.getCode());
-                    judgeExecuteService.broadcast(submission);
-                    log.warn("提交 {} 卡死超限，置为 SYSTEM_ERROR", submission.getSubmitId());
+                    // 超过重试上限：仅本次成功落库为 SYSTEM_ERROR 才广播；
+                    // 若正常判题已并发落为其他终态，不能用内存中的旧记录广播错误结论
+                    if (stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
+                            "判题卡死超过重试上限，由补偿任务置为系统错误")) {
+                        judgeExecuteService.broadcast(submission);
+                        log.warn("提交 {} 卡死超限，置为 SYSTEM_ERROR", submission.getSubmitId());
+                    }
                 }
             } catch (Exception e) {
                 log.error("卡死提交处理失败 submitId={}", submission.getSubmitId(), e);

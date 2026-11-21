@@ -48,8 +48,8 @@ public class JudgeDlqConsumer implements RocketMQListener<MessageExt> {
         String body = new String(messageExt.getBody(), StandardCharsets.UTF_8);
         log.error("收到判题死信 msgId={} body={}", msgId, body);
 
-        // 1. 兜底终态并广播：transitionToTerminal 对终态幂等，重复消费安全；
-        //    广播保证 WebSocket/轮询与统计订阅能拿到最终结论，否则用户只能看到提交一直停在判题中
+        // 1. 兜底终态并广播：仅本次成功置为终态才广播；
+        //    并发冲突时正常判题结果已落库，不能再广播旧记录对应的 SYSTEM_ERROR
         try {
             JudgeSubmitMessage submitMessage = objectMapper.readValue(body, JudgeSubmitMessage.class);
             // 优先按提交记录主键定位；submitId 仅在同一用户内唯一，不能作为全局条件
@@ -59,9 +59,10 @@ public class JudgeDlqConsumer implements RocketMQListener<MessageExt> {
                     : judgeSubmissionMapper.selectById(submitMessage.getSubmissionId());
             if (submission != null
                     && !JudgeStatusEnum.fromCode(submission.getStatus()).isTerminal()) {
-                stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
-                        "判题多次失败进入死信，已归档");
-                judgeExecuteService.broadcast(submission);
+                if (stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
+                        "判题多次失败进入死信，已归档")) {
+                    judgeExecuteService.broadcast(submission);
+                }
             }
         } catch (Exception e) {
             log.error("死信解析/兜底失败 msgId={}", msgId, e);

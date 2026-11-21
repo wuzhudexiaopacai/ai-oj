@@ -83,7 +83,8 @@ public class JudgeStateMachineService {
         if (nextStatus.isTerminal()) {
             submission.setJudgeTime(LocalDateTime.now());
         }
-        judgeSubmissionMapper.updateById(submission);
+        Asserts.isTrue(judgeSubmissionMapper.updateById(submission) > 0,
+                "提交状态已并发修改，本次状态迁移失效");
         log.info("提交 {} 状态迁移 {} -> {}", submission.getSubmitId(), currentStatus, nextStatus);
     }
 
@@ -93,15 +94,16 @@ public class JudgeStateMachineService {
      * @param submission 提交记录
      * @param terminalStatus 终态
      * @param errorMessage 错误信息
+     * @return 仅本次成功落库为终态返回 true；已终态或乐观锁冲突返回 false
      */
     @Transactional(rollbackFor = Exception.class)
-    public void transitionToTerminal(JudgeSubmission submission, JudgeStatusEnum terminalStatus, String errorMessage) {
+    public boolean transitionToTerminal(JudgeSubmission submission, JudgeStatusEnum terminalStatus, String errorMessage) {
         Asserts.notNull(submission, "提交记录不能为空");
         Asserts.isTrue(terminalStatus != null && terminalStatus.isTerminal(), "目标状态必须是终态");
 
         JudgeStatusEnum currentStatus = JudgeStatusEnum.fromCode(submission.getStatus());
         if (currentStatus.isTerminal()) {
-            return;
+            return false;
         }
 
         // 直接落库为终态，不经过状态机（兜底场景允许跨状态跳转）
@@ -113,8 +115,9 @@ public class JudgeStateMachineService {
         if (judgeSubmissionMapper.updateById(submission) == 0) {
             // 乐观锁冲突：其他实例已更新该提交，终态以先落库者为准
             log.warn("提交 {} 兜底置终态时发生并发冲突，跳过", submission.getSubmitId());
-            return;
+            return false;
         }
         log.info("提交 {} 兜底置为终态 {}", submission.getSubmitId(), terminalStatus);
+        return true;
     }
 }
