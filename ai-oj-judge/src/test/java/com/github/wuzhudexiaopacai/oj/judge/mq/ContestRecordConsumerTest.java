@@ -63,6 +63,7 @@ class ContestRecordConsumerTest {
                 Instant.ofEpochMilli(1_300_000L), ZoneId.systemDefault());
         when(judgeSubmissionMapper.selectFirstAcceptedTimesByContest(1L, 7L))
                 .thenReturn(List.of(firstAc));
+        when(judgeSubmissionMapper.selectWrongAttemptsBeforeFirstAccepted(1L, 7L)).thenReturn(0);
 
         consumer.onMessage(messageOf(JudgeStatusEnum.ACCEPTED));
 
@@ -71,7 +72,43 @@ class ContestRecordConsumerTest {
     }
 
     @Test
-    void wrongAnswerMessageShouldKeepExistingPenalty() {
+    void acceptedMessageShouldAddPenaltyForWrongAttemptsBeforeFirstAc() {
+        when(contestRecordMapper.selectOne(any())).thenReturn(recordOf(99L, 50L));
+        when(judgeSubmissionMapper.selectBestScoreSumByContest(1L, 7L)).thenReturn(100);
+        when(judgeSubmissionMapper.selectSolvedCountByContest(1L, 7L)).thenReturn(1);
+        when(contestFeignClient.runtime(1L, null)).thenReturn(Result.ok(runtimeOf(1_000_000L)));
+        LocalDateTime firstAc = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(1_300_000L), ZoneId.systemDefault());
+        when(judgeSubmissionMapper.selectFirstAcceptedTimesByContest(1L, 7L))
+                .thenReturn(List.of(firstAc));
+        when(judgeSubmissionMapper.selectWrongAttemptsBeforeFirstAccepted(1L, 7L)).thenReturn(2);
+
+        consumer.onMessage(messageOf(JudgeStatusEnum.ACCEPTED));
+
+        // 罚时 = 首次 AC 时间差 300s + 2 次错误提交 × 1200s = 2700s
+        verify(contestRecordMapper).mergeScore(99L, 100, 1, 2700L);
+    }
+
+    @Test
+    void lateWrongAnswerAfterAcceptedShouldRecalculatePenalty() {
+        when(contestRecordMapper.selectOne(any())).thenReturn(recordOf(99L, 50L));
+        when(judgeSubmissionMapper.selectBestScoreSumByContest(1L, 7L)).thenReturn(100);
+        when(judgeSubmissionMapper.selectSolvedCountByContest(1L, 7L)).thenReturn(1);
+        when(contestFeignClient.runtime(1L, null)).thenReturn(Result.ok(runtimeOf(1_000_000L)));
+        LocalDateTime firstAc = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(1_300_000L), ZoneId.systemDefault());
+        when(judgeSubmissionMapper.selectFirstAcceptedTimesByContest(1L, 7L))
+                .thenReturn(List.of(firstAc));
+        when(judgeSubmissionMapper.selectWrongAttemptsBeforeFirstAccepted(1L, 7L)).thenReturn(1);
+
+        consumer.onMessage(messageOf(JudgeStatusEnum.WRONG_ANSWER));
+
+        // 较早提交晚于 AC 返回 WA 时，也要补上这次错误提交的 1200s 罚时
+        verify(contestRecordMapper).mergeScore(99L, 100, 1, 1500L);
+    }
+
+    @Test
+    void wrongAnswerWithoutAcceptedProblemShouldKeepExistingPenalty() {
         when(contestRecordMapper.selectOne(any())).thenReturn(recordOf(99L, 50L));
         when(judgeSubmissionMapper.selectBestScoreSumByContest(1L, 7L)).thenReturn(30);
         when(judgeSubmissionMapper.selectSolvedCountByContest(1L, 7L)).thenReturn(0);

@@ -41,6 +41,8 @@ import java.util.Objects;
 @RocketMQMessageListener(consumerGroup = MqConstants.GROUP_CONTEST_RECORD, topic = MqConstants.JUDGE_RESULT_TOPIC)
 public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessage> {
 
+    private static final long PENALTY_PER_WRONG_SUBMISSION_SECONDS = 20 * 60L;
+
     private final ContestRecordMapper contestRecordMapper;
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
@@ -63,9 +65,9 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
         int acceptCount = nvl(judgeSubmissionMapper.selectSolvedCountByContest(
                 message.getContestId(), message.getUserId()));
 
-        // 罚时只在通过时可能变化；非通过消息远程查询比赛开始时间没有意义
+        // 仅有 AC 题目才产生罚时；AC 或计罚的错误结果都可能改变罚时（较早提交可能晚于 AC 返回）
         long penaltySeconds = record.getPenaltySeconds() == null ? 0L : record.getPenaltySeconds();
-        if (isSolved(message.getStatusCode())) {
+        if (acceptCount > 0 && shouldRecalculatePenalty(message.getStatusCode())) {
             Long startMillis = queryContestStartMillis(message.getContestId());
             if (startMillis == null) {
                 log.warn("比赛开始时间不可用，本次仅更新得分与通过数 contestId={} userId={}",
@@ -112,7 +114,8 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
     }
 
     /**
-     * 计算 ACM 罚时：每题首次通过时间 - 比赛开始时间，逐题累加（秒）
+     * 计算 ACM 罚时：每题首次通过时间 - 比赛开始时间，逐题累加（秒），
+     * 并叠加各题首次通过前每次有效错误提交的 20 分钟罚时；编译错误与系统错误不计入。
      */
     private long calcPenaltySeconds(Long contestId, Long userId, long startMillis) {
         List<LocalDateTime> firstAcceptedTimes = judgeSubmissionMapper
@@ -120,11 +123,14 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
         if (firstAcceptedTimes == null || firstAcceptedTimes.isEmpty()) {
             return 0L;
         }
-        return firstAcceptedTimes.stream()
+        long timePenalty = firstAcceptedTimes.stream()
                 .filter(Objects::nonNull)
                 .mapToLong(time -> Math.max(
                         (time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() - startMillis) / 1000, 0))
                 .sum();
+        int wrongAttempts = nvl(judgeSubmissionMapper
+                .selectWrongAttemptsBeforeFirstAccepted(contestId, userId));
+        return timePenalty + wrongAttempts * PENALTY_PER_WRONG_SUBMISSION_SECONDS;
     }
 
     /**
@@ -143,8 +149,15 @@ public class ContestRecordConsumer implements RocketMQListener<JudgeResultMessag
         return null;
     }
 
-    private boolean isSolved(Integer statusCode) {
-        return statusCode != null && statusCode == JudgeStatusEnum.ACCEPTED.getCode();
+    private boolean shouldRecalculatePenalty(Integer statusCode) {
+        if (statusCode == null) {
+            return false;
+        }
+        return switch (JudgeStatusEnum.fromCode(statusCode)) {
+            case ACCEPTED, WRONG_ANSWER, TIME_LIMIT_EXCEEDED, MEMORY_LIMIT_EXCEEDED,
+                    RUNTIME_ERROR, PRESENTATION_ERROR, OUTPUT_LIMIT_EXCEEDED -> true;
+            default -> false;
+        };
     }
 
     private int nvl(Integer value) {

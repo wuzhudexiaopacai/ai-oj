@@ -111,5 +111,24 @@ public interface JudgeSubmissionMapper extends BaseMapper<JudgeSubmission> {
             + "AND status = 3 AND deleted = 0 GROUP BY problem_id")
     List<LocalDateTime> selectFirstAcceptedTimesByContest(@Param("contestId") Long contestId,
                                                           @Param("userId") Long userId);
+
+    /**
+     * 统计用户在指定比赛内、各题首次通过前的有效错误提交次数（用于 ACM 罚时）
+     * <p>
+     * 仅统计已通过的题目；排队/编译/判题中、AC、编译错误（8）和系统错误（11）不计罚时。
+     *
+     * @param contestId 比赛 ID
+     * @param userId    用户 ID
+     * @return 有效错误提交总次数
+     */
+    @Select("SELECT COUNT(*) FROM judge_submission w "
+            + "JOIN (SELECT problem_id, MIN(create_time) AS first_ac FROM judge_submission "
+            + "WHERE contest_id = #{contestId} AND user_id = #{userId} "
+            + "AND status = 3 AND deleted = 0 GROUP BY problem_id) a "
+            + "ON a.problem_id = w.problem_id AND w.create_time < a.first_ac "
+            + "WHERE w.contest_id = #{contestId} AND w.user_id = #{userId} "
+            + "AND w.deleted = 0 AND w.status NOT IN (0, 1, 2, 3, 8, 11)")
+    Integer selectWrongAttemptsBeforeFirstAccepted(@Param("contestId") Long contestId,
+                                                   @Param("userId") Long userId);
 }
 
