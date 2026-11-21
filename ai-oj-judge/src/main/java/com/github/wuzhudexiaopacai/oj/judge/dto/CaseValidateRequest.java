@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.List;
@@ -24,7 +25,8 @@ public class CaseValidateRequest {
     private String language;
 
     @NotBlank(message = "code 不能为空")
-    @Schema(description = "参考代码（标准答案），对每组用例输入实跑得到真实输出",
+    @Size(max = 65535, message = "参考代码长度不能超过 65535 个字符")
+    @Schema(description = "参考代码（标准答案），对每组用例输入实跑得到真实输出，最长 65535 个字符",
             requiredMode = Schema.RequiredMode.REQUIRED)
     private String code;
 
@@ -32,8 +34,9 @@ public class CaseValidateRequest {
     private Integer timeLimitMs;
 
     @NotEmpty(message = "cases 不能为空")
+    @Size(max = 200, message = "单次最多校验 200 组用例")
     @Valid
-    @Schema(description = "待校验用例列表", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "待校验用例列表，单次最多 200 组", requiredMode = Schema.RequiredMode.REQUIRED)
     private List<CaseItem> cases;
 
     /**
@@ -46,10 +49,12 @@ public class CaseValidateRequest {
         @Schema(description = "用例序号，从 1 开始", example = "1")
         private Integer seq;
 
-        @Schema(description = "标准输入内容，可为空（无输入题）")
+        @Size(max = 65535, message = "用例输入不能超过 65535 个字符")
+        @Schema(description = "标准输入内容，可为空（无输入题），最长 65535 个字符")
         private String input;
 
-        @Schema(description = "期望输出（AI 生成值），与参考代码实跑输出比对")
+        @Size(max = 65535, message = "期望输出不能超过 65535 个字符")
+        @Schema(description = "期望输出（AI 生成值），与参考代码实跑输出比对，最长 65535 个字符")
         private String expectedOutput;
     }
 }

@@ -2,6 +2,7 @@ package com.github.wuzhudexiaopacai.oj.judge.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
@@ -27,13 +28,15 @@ public class JudgeRunRequest {
     private String language;
 
     @NotBlank(message = "code 不能为空")
-    @Schema(description = "自测代码，不能为空，直接提交沙箱编译运行", example = "print(1)",
+    @Size(max = 65535, message = "代码长度不能超过 65535 个字符")
+    @Schema(description = "自测代码，不能为空，最长 65535 个字符；直接提交沙箱编译运行", example = "print(1)",
             requiredMode = Schema.RequiredMode.REQUIRED)
     private String code;
 
     /**
      * 自测输入
      */
-    @Schema(description = "标准输入内容，可为空；按原文透传给沙箱", example = "1 2")
+    @Size(max = 65535, message = "输入内容不能超过 65535 个字符")
+    @Schema(description = "标准输入内容，可为空，最长 65535 个字符；按原文透传给沙箱", example = "1 2")
     private String input;
 }
