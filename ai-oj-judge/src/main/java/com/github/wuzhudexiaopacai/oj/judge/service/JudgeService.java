@@ -455,7 +455,10 @@ public class JudgeService {
                         vo.getCases().add(r);
                         break;
                     }
-                    boolean ok = normalizeOutput(resp.output())
+                    // 仅在参考程序正常跑完时比较输出：超时/运行错误的程序也可能先输出正确内容，
+                    // 只看文本会把这样的用例误判为校验通过
+                    boolean ok = status == JudgeStatusEnum.ACCEPTED
+                            && normalizeOutput(resp.output())
                             .equals(normalizeOutput(item.getExpectedOutput()));
                     r.setPassed(ok);
                     if (ok) {

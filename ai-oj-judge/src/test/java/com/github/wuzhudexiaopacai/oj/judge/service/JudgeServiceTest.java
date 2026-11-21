@@ -22,6 +22,8 @@ import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunRequest;
+import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxRunResponse;
+import com.github.wuzhudexiaopacai.oj.judge.vo.CaseValidateVO;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -46,6 +48,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -269,6 +272,45 @@ class JudgeServiceTest {
         assertEquals(30000, captor.getValue().timeLimitMs().intValue());
         verify(sandboxLoadStrategy, never()).blacklist(anyString());
         verify(sandboxLoadStrategy).release("sbx-1");
+    }
+
+    @Test
+    void validateCasesShouldNotPassWhenReferenceRunFailsButOutputMatches() {
+        givenRateLimiterAcquires();
+        givenSingleSandbox();
+        when(sandboxClient.run(anyString(), any()))
+                .thenReturn(new SandboxRunResponse("TIME_LIMIT_EXCEEDED", "3", "", 10000, 1024));
+
+        CaseValidateVO vo = judgeService.validateCases(validateRequestOf("3"));
+
+        assertFalse(vo.getCases().get(0).getPassed());
+        assertEquals(0, vo.getPassedCount().intValue());
+        assertFalse(vo.getOverallPassed());
+    }
+
+    @Test
+    void validateCasesShouldPassWhenReferenceRunAcceptedAndOutputMatches() {
+        givenRateLimiterAcquires();
+        givenSingleSandbox();
+        when(sandboxClient.run(anyString(), any()))
+                .thenReturn(new SandboxRunResponse("ACCEPTED", "3\n", "", 10, 1024));
+
+        CaseValidateVO vo = judgeService.validateCases(validateRequestOf("3"));
+
+        assertTrue(vo.getCases().get(0).getPassed());
+        assertEquals(1, vo.getPassedCount().intValue());
+        assertTrue(vo.getOverallPassed());
+    }
+
+    private CaseValidateRequest validateRequestOf(String expectedOutput) {
+        CaseValidateRequest req = new CaseValidateRequest();
+        req.setLanguage("cpp");
+        req.setCode("int main() { return 0; }");
+        CaseValidateRequest.CaseItem item = new CaseValidateRequest.CaseItem();
+        item.setSeq(1);
+        item.setExpectedOutput(expectedOutput);
+        req.setCases(List.of(item));
+        return req;
     }
 
     private void givenRateLimiterAcquires() {
