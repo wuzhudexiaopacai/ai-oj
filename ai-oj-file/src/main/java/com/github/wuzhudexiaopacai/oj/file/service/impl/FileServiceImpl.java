@@ -137,6 +137,29 @@ public class FileServiceImpl implements FileService {
                     .chunkSize(fileUploadProperties.getChunkSize())
                     .build();
         }
+        // 超时清理后的记录仍被 uk_md5 占用：重置为上传中，否则同一文件将永远只能拿到已失效会话
+        if (existing != null && Integer.valueOf(STATUS_CLEANED).equals(existing.getStatus())) {
+            String bizType = StrUtil.blankToDefault(request.getBizType(), "common");
+            FileRecord reset = new FileRecord();
+            reset.setId(existing.getId());
+            reset.setFileName(request.getFileName());
+            reset.setFileSize(request.getSize());
+            reset.setChunkTotal(request.getChunkTotal());
+            reset.setChunkDone(0);
+            reset.setUploadId(COMPOSE_UPLOAD_ID);
+            reset.setBizType(bizType);
+            reset.setUploaderId(SecurityUtils.currentUserIdOrNull());
+            reset.setStatus(STATUS_UPLOADING);
+            fileRecordMapper.updateById(reset);
+            cacheUploadContext(md5, request, bizType);
+            scheduleCleanup(existing.getId(), md5);
+            return UploadInitVO.builder()
+                    .fileId(existing.getId())
+                    .uploaded(false)
+                    .uploadedChunks(List.of())
+                    .chunkSize(fileUploadProperties.getChunkSize())
+                    .build();
+        }
 
         // 全新上传：落库 + Redis 上下文 + 延时清理消息
         FileRecord record = new FileRecord();
@@ -167,22 +190,10 @@ public class FileServiceImpl implements FileService {
         }
 
         // Redis HASH 存上传上下文，TTL 与分片保留时长一致
-        Map<String, Object> context = new HashMap<>(8);
-        context.put("fileName", request.getFileName());
-        context.put("size", String.valueOf(request.getSize()));
-        context.put("chunkTotal", String.valueOf(request.getChunkTotal()));
-        context.put("bizType", record.getBizType());
-        String uploadKey = RedisKeys.FILE_UPLOAD + md5;
-        redisTemplate.opsForHash().putAll(uploadKey, context);
-        redisTemplate.expire(uploadKey, fileUploadProperties.getChunkExpireMinutes(), TimeUnit.MINUTES);
+        cacheUploadContext(md5, request, record.getBizType());
 
         // 延时消息兜底清理超时未完成的分片
-        FileCleanMessage cleanMessage = new FileCleanMessage(record.getId(), md5);
-        rocketMQTemplate.syncSend(MqConstants.FILE_CLEAN_TOPIC,
-                MessageBuilder.withPayload(cleanMessage)
-                        .setHeader(RocketMQHeaders.KEYS, String.valueOf(record.getId()))
-                        .build(),
-                5000, fileUploadProperties.getCleanDelayLevel());
+        scheduleCleanup(record.getId(), md5);
 
         return UploadInitVO.builder()
                 .fileId(record.getId())
@@ -190,6 +201,32 @@ public class FileServiceImpl implements FileService {
                 .uploadedChunks(List.of())
                 .chunkSize(fileUploadProperties.getChunkSize())
                 .build();
+    }
+
+    /**
+     * 写入 Redis 上传上下文（TTL 与分片保留时长一致）
+     */
+    private void cacheUploadContext(String md5, UploadInitRequest request, String bizType) {
+        Map<String, Object> context = new HashMap<>(8);
+        context.put("fileName", request.getFileName());
+        context.put("size", String.valueOf(request.getSize()));
+        context.put("chunkTotal", String.valueOf(request.getChunkTotal()));
+        context.put("bizType", bizType);
+        String uploadKey = RedisKeys.FILE_UPLOAD + md5;
+        redisTemplate.opsForHash().putAll(uploadKey, context);
+        redisTemplate.expire(uploadKey, fileUploadProperties.getChunkExpireMinutes(), TimeUnit.MINUTES);
+    }
+
+    /**
+     * 投递延时清理消息，兜底清理超时未完成的分片
+     */
+    private void scheduleCleanup(Long fileId, String md5) {
+        FileCleanMessage cleanMessage = new FileCleanMessage(fileId, md5);
+        rocketMQTemplate.syncSend(MqConstants.FILE_CLEAN_TOPIC,
+                MessageBuilder.withPayload(cleanMessage)
+                        .setHeader(RocketMQHeaders.KEYS, String.valueOf(fileId))
+                        .build(),
+                5000, fileUploadProperties.getCleanDelayLevel());
     }
 
     @Override
