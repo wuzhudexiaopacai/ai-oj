@@ -38,6 +38,21 @@ pub struct ContainerResult {
     pub memory_kb: u64,
 }
 
+const MAX_LOG_BYTES: usize = 64 * 1024;
+
+/// 截断日志时回退到 UTF-8 字符边界，避免多字节输出导致 panic
+fn truncate_log(log: &mut String) -> bool {
+    if log.len() <= MAX_LOG_BYTES {
+        return false;
+    }
+    let mut boundary = MAX_LOG_BYTES;
+    while !log.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    log.truncate(boundary);
+    true
+}
+
 #[derive(Clone)]
 pub struct DockerManager {
     docker: Docker,
@@ -241,8 +256,7 @@ impl DockerManager {
                 Ok(_) => {}
                 Err(e) => return Err(SandboxError::Docker(e)),
             }
-            if out.len() > 64 * 1024 {
-                out.truncate(64 * 1024);
+            if truncate_log(&mut out) {
                 break;
             }
         }
@@ -318,7 +332,7 @@ fn validate_task_id(task_id: &str) -> Result<(), SandboxError> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_task_id;
+    use super::{truncate_log, validate_task_id, MAX_LOG_BYTES};
 
     #[test]
     fn uuid_task_id_should_pass() {
@@ -336,5 +350,23 @@ mod tests {
     #[test]
     fn overlong_task_id_should_be_rejected() {
         assert!(validate_task_id(&"a".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn log_truncation_should_preserve_utf8_boundary() {
+        let mut log = "a".repeat(MAX_LOG_BYTES - 1);
+        log.push_str("世界");
+
+        assert!(truncate_log(&mut log));
+        assert_eq!(log.len(), MAX_LOG_BYTES - 1);
+        assert!(log.is_char_boundary(log.len()));
+    }
+
+    #[test]
+    fn log_at_limit_should_not_be_truncated() {
+        let mut log = "a".repeat(MAX_LOG_BYTES);
+
+        assert!(!truncate_log(&mut log));
+        assert_eq!(log.len(), MAX_LOG_BYTES);
     }
 }
