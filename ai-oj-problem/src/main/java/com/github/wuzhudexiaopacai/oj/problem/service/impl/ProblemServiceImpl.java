@@ -588,6 +588,11 @@ public class ProblemServiceImpl implements ProblemService {
         if (problem == null) {
             return null;
         }
+        // 未上架/非公开题目不对外暴露详情，与列表、搜索的可见性口径保持一致
+        if (!Integer.valueOf(STATUS_ONLINE).equals(problem.getStatus())
+                || !Integer.valueOf(AUTH_PUBLIC).equals(problem.getAuth())) {
+            return null;
+        }
         ProblemDetailVO vo = BeanUtil.copyProperties(problem, ProblemDetailVO.class);
         vo.setTags(listTagsByProblemIds(List.of(problem.getId()))
                 .getOrDefault(problem.getId(), Collections.emptyList()));
