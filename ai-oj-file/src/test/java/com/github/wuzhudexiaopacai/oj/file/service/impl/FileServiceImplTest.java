@@ -1,5 +1,7 @@
 package com.github.wuzhudexiaopacai.oj.file.service.impl;
 
+import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
+import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.file.config.FileUploadProperties;
 import com.github.wuzhudexiaopacai.oj.file.config.MinioConfig;
 import com.github.wuzhudexiaopacai.oj.file.dto.UploadInitRequest;
@@ -18,9 +20,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.messaging.Message;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -107,6 +114,52 @@ class FileServiceImplTest {
         assertTrue(vo.getUploaded());
         verify(fileRecordMapper, never()).updateById(any(FileRecord.class));
         verify(fileRecordMapper, never()).insert(any(FileRecord.class));
+    }
+
+    @Test
+    void presignedUrlShouldRejectOtherUser() throws Exception {
+        login(7L, List.of("USER"));
+        when(fileRecordMapper.selectById(9L)).thenReturn(completedRecord(9L, 1L));
+
+        assertThrows(BizException.class, () -> fileService.getPresignedUrl(9L));
+        verify(minioClient, never()).getPresignedObjectUrl(any());
+    }
+
+    @Test
+    void presignedUrlShouldAllowUploader() throws Exception {
+        login(1L, List.of("USER"));
+        when(fileRecordMapper.selectById(9L)).thenReturn(completedRecord(9L, 1L));
+        when(minioConfig.getBucket()).thenReturn("ai-oj");
+        when(fileUploadProperties.getPresignExpireSeconds()).thenReturn(600L);
+        when(minioClient.getPresignedObjectUrl(any())).thenReturn("http://minio/url");
+
+        assertEquals("http://minio/url", fileService.getPresignedUrl(9L));
+    }
+
+    @Test
+    void presignedUrlShouldAllowFileManager() throws Exception {
+        login(7L, List.of("file:manage"));
+        when(fileRecordMapper.selectById(9L)).thenReturn(completedRecord(9L, 1L));
+        when(minioConfig.getBucket()).thenReturn("ai-oj");
+        when(fileUploadProperties.getPresignExpireSeconds()).thenReturn(600L);
+        when(minioClient.getPresignedObjectUrl(any())).thenReturn("http://minio/url");
+
+        assertEquals("http://minio/url", fileService.getPresignedUrl(9L));
+    }
+
+    private void login(Long userId, List<String> authorities) {
+        LoginUser loginUser = LoginUser.builder().id(userId).username("u").authorities(authorities).build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(loginUser, null, List.of()));
+    }
+
+    private FileRecord completedRecord(Long id, Long uploaderId) {
+        FileRecord record = new FileRecord();
+        record.setId(id);
+        record.setUploaderId(uploaderId);
+        record.setStatus(FileServiceImpl.STATUS_COMPLETED);
+        record.setObjectName("files/" + MD5 + "/solution.zip");
+        return record;
     }
 
     private FileRecord recordOf(Long id, int status) {

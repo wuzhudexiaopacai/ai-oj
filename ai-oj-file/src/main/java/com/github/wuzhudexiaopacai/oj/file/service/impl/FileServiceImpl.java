@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.RedisKeys;
+import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
@@ -49,6 +50,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -77,6 +79,11 @@ public class FileServiceImpl implements FileService {
      * 状态：已完成
      */
     public static final int STATUS_COMPLETED = 1;
+
+    /**
+     * 文件管理权限标识（管理员可下载任意文件）
+     */
+    private static final String AUTHORITY_FILE_MANAGE = "file:manage";
 
     /**
      * 状态：已清理（超时未完成被延时任务清理）
@@ -383,6 +390,11 @@ public class FileServiceImpl implements FileService {
         FileRecord record = fileRecordMapper.selectById(id);
         Asserts.notNull(record, "文件不存在");
         Asserts.isTrue(Integer.valueOf(STATUS_COMPLETED).equals(record.getStatus()), "文件尚未上传完成");
+        // 仅上传者本人或具备 file:manage 的管理员可获取下载地址，避免凭记录 ID 读取他人文件
+        LoginUser loginUser = SecurityUtils.requireLogin();
+        Asserts.isTrue(Objects.equals(record.getUploaderId(), loginUser.getId())
+                        || loginUser.getAuthorities().contains(AUTHORITY_FILE_MANAGE),
+                "无权访问该文件");
         return presign(record.getObjectName());
     }
 
