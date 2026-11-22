@@ -1,6 +1,7 @@
 package com.github.wuzhudexiaopacai.oj.contest.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.github.wuzhudexiaopacai.oj.api.feign.JudgeFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.enums.ContestStatusEnum;
@@ -17,6 +18,7 @@ import io.seata.spring.annotation.GlobalTransactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -42,6 +44,16 @@ public class ContestRegistrationServiceImpl implements ContestRegistrationServic
      */
     private static final int AUTH_PRIVATE = 2;
 
+    /**
+     * BCrypt 哈希前缀，用于识别历史明文密码
+     */
+    private static final String BCRYPT_PREFIX = "$2";
+
+    /**
+     * 比赛密码哈希器：库内只保存 BCrypt 哈希，不保存明文
+     */
+    private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
+
     private final ContestMapper contestMapper;
 
     private final ContestRegistrationMapper registrationMapper;
@@ -56,8 +68,18 @@ public class ContestRegistrationServiceImpl implements ContestRegistrationServic
         Asserts.notNull(contest, "比赛不存在");
         // 私有赛必须校验密码，否则拿到链接的人可以直接报名看到题目
         if (Integer.valueOf(AUTH_PRIVATE).equals(contest.getAuth())) {
-            Asserts.isTrue(StringUtils.hasText(contest.getPassword()), "该比赛为私有赛但未设置密码，请联系管理员");
-            Asserts.isTrue(StringUtils.hasText(password) && contest.getPassword().equals(password), "比赛密码错误");
+            String stored = contest.getPassword();
+            Asserts.isTrue(StringUtils.hasText(stored), "该比赛为私有赛但未设置密码，请联系管理员");
+            Asserts.isTrue(StringUtils.hasText(password), "比赛密码错误");
+            // 历史数据可能是明文密码：首次校验成功后升级为 BCrypt 哈希
+            boolean hashed = stored.startsWith(BCRYPT_PREFIX);
+            boolean matched = hashed ? PASSWORD_ENCODER.matches(password, stored) : stored.equals(password);
+            Asserts.isTrue(matched, "比赛密码错误");
+            if (!hashed) {
+                contestMapper.update(null, new LambdaUpdateWrapper<Contest>()
+                        .eq(Contest::getId, contestId)
+                        .set(Contest::getPassword, PASSWORD_ENCODER.encode(password)));
+            }
         }
         String status = contest.getStatus();
         Asserts.isTrue(ContestStatusEnum.SCHEDULED.name().equals(status)

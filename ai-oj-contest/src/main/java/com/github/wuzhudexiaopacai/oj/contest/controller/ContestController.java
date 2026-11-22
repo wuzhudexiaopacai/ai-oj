@@ -4,6 +4,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.annotation.Idempotent;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.web.result.PageResult;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestPageQueryDTO;
+import com.github.wuzhudexiaopacai.oj.contest.dto.ContestRegisterRequest;
 import com.github.wuzhudexiaopacai.oj.contest.service.ContestRankService;
 import com.github.wuzhudexiaopacai.oj.contest.service.ContestRegistrationService;
 import com.github.wuzhudexiaopacai.oj.contest.service.ContestService;
@@ -13,14 +14,15 @@ import com.github.wuzhudexiaopacai.oj.contest.vo.ContestRankVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -69,8 +71,8 @@ public class ContestController {
             message = "请勿重复报名")
     public Result<Void> register(
             @Parameter(description = "比赛 ID", required = true, example = "1") @PathVariable("id") Long contestId,
-            @Parameter(description = "私有赛密码；公开赛可省略，私有赛密码错误或为空时报名失败", required = false, example = "123456") @RequestParam(value = "password", required = false) String password) {
-        registrationService.register(contestId, password);
+            @Valid @RequestBody(required = false) ContestRegisterRequest request) {
+        registrationService.register(contestId, request == null ? null : request.getPassword());
         return Result.ok();
     }
 

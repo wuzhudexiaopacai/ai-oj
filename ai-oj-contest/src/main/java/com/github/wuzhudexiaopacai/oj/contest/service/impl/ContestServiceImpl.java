@@ -31,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -80,6 +81,11 @@ public class ContestServiceImpl implements ContestService {
      * 比赛管理权限标识（管理员不受题目可见性限制）
      */
     private static final String AUTHORITY_CONTEST_MANAGE = "contest:manage";
+
+    /**
+     * 比赛密码哈希器：库内只保存 BCrypt 哈希，不保存明文
+     */
+    private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
 
     /**
      * 单场比赛题目数量上限（display_id A~Z）
@@ -291,6 +297,7 @@ public class ContestServiceImpl implements ContestService {
         // 私有赛没有密码会导致任何人都无法报名，创建时直接拦下
         Asserts.isTrue(!Integer.valueOf(AUTH_PRIVATE).equals(contest.getAuth())
                 || StringUtils.hasText(contest.getPassword()), "私有赛必须设置比赛密码");
+        contest.setPassword(encodePassword(contest.getPassword()));
         contestMapper.insert(contest);
         return contest.getId();
     }
@@ -308,6 +315,8 @@ public class ContestServiceImpl implements ContestService {
             // 密码留空表示沿用原密码（详情接口不回显明文密码）
             if (!StringUtils.hasText(contest.getPassword())) {
                 contest.setPassword(exist.getPassword());
+            } else {
+                contest.setPassword(encodePassword(contest.getPassword()));
             }
             Asserts.isTrue(StringUtils.hasText(contest.getPassword()), "私有赛必须设置比赛密码");
         } else {
@@ -453,5 +462,15 @@ public class ContestServiceImpl implements ContestService {
         ContestProblemVO vo = new ContestProblemVO();
         BeanUtils.copyProperties(contestProblem, vo);
         return vo;
+    }
+
+    /**
+     * 比赛密码哈希：空密码保持为空（公开赛）
+     *
+     * @param password 明文密码
+     * @return BCrypt 哈希或空串
+     */
+    private String encodePassword(String password) {
+        return StringUtils.hasText(password) ? PASSWORD_ENCODER.encode(password) : "";
     }
 }
