@@ -30,6 +30,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.util.JwtUtils;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -69,6 +70,24 @@ public class AuthServiceImpl implements AuthService {
 
     private final TokenSessionService tokenSessionService;
 
+    /**
+     * 单用户名允许的连续登录失败次数，达到后短时锁定
+     */
+    @Value("${ai-oj.auth.login-max-failures:5}")
+    private int loginMaxFailures;
+
+    /**
+     * 登录失败计数保留时长（分钟），同时作为锁定时长
+     */
+    @Value("${ai-oj.auth.login-lock-minutes:5}")
+    private long loginLockMinutes;
+
+    /**
+     * 单 IP 每小时允许的注册次数
+     */
+    @Value("${ai-oj.auth.register-ip-limit:5}")
+    private int registerIpLimit;
+
     @Override
     public CaptchaVO captcha() {
         LineCaptcha lineCaptcha = CaptchaUtil.createLineCaptcha(160, 60, 4, 30);
@@ -80,10 +99,18 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginVO login(LoginRequest request, String ip, String userAgent) {
+        // 先检查失败次数，达到阈值直接拒绝，避免继续消耗验证码与密码比对开销
+        String failKey = RedisKeys.LOGIN_FAIL + request.getUsername();
+        String failures = stringRedisTemplate.opsForValue().get(failKey);
+        if (failures != null && Integer.parseInt(failures) >= loginMaxFailures) {
+            loginLogProducer.send(null, request.getUsername(), ip, userAgent, 0, "登录失败次数过多，已临时锁定");
+            throw new BizException(ResultCode.TOO_MANY_REQUESTS.getCode(), "登录失败次数过多，请稍后再试");
+        }
         verifyCaptcha(request.getCaptchaKey(), request.getCaptchaCode());
         SysUser user = userMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
                 .eq(SysUser::getUsername, request.getUsername()));
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            recordLoginFailure(failKey);
             loginLogProducer.send(null, request.getUsername(), ip, userAgent, 0, "用户名或密码错误");
             throw new BizException("用户名或密码错误");
         }
@@ -91,16 +118,48 @@ public class AuthServiceImpl implements AuthService {
             loginLogProducer.send(user.getId(), user.getUsername(), ip, userAgent, 0, "账号已被禁用");
             throw new BizException("账号已被禁用，请联系管理员");
         }
+        // 登录成功清空失败计数
+        stringRedisTemplate.delete(failKey);
         UserInfoVO userInfo = userService.buildUserInfo(user);
         String token = generateToken(user, userInfo);
         loginLogProducer.send(user.getId(), user.getUsername(), ip, userAgent, 1, "登录成功");
         return new LoginVO(token, userInfo);
     }
 
+    /**
+     * 记录一次登录失败：首次失败时设置计数有效期，形成固定窗口锁定
+     *
+     * @param failKey 失败计数 Key
+     */
+    private void recordLoginFailure(String failKey) {
+        Long count = stringRedisTemplate.opsForValue().increment(failKey);
+        if (count != null && count == 1L) {
+            stringRedisTemplate.expire(failKey, loginLockMinutes, TimeUnit.MINUTES);
+        }
+    }
+
+    /**
+     * 单 IP 注册频率限制（每小时），超限直接拒绝
+     *
+     * @param ip 客户端 IP
+     */
+    private void checkRegisterIpLimit(String ip) {
+        if (StrUtil.isBlank(ip)) {
+            return;
+        }
+        String key = RedisKeys.REGISTER_IP + ip;
+        Long count = stringRedisTemplate.opsForValue().increment(key);
+        if (count != null && count == 1L) {
+            stringRedisTemplate.expire(key, 1, TimeUnit.HOURS);
+        }
+        Asserts.isTrue(count == null || count <= registerIpLimit, "注册过于频繁，请稍后再试");
+    }
+
     @Transactional(rollbackFor = Exception.class)
     @Override
     public UserInfoVO register(RegisterRequest request, String ip, String userAgent) {
         verifyCaptcha(request.getCaptchaKey(), request.getCaptchaCode());
+        checkRegisterIpLimit(ip);
         Long usernameCount = userMapper.selectCount(Wrappers.<SysUser>lambdaQuery()
                 .eq(SysUser::getUsername, request.getUsername()));
         Asserts.isTrue(usernameCount == 0, "用户名已存在");

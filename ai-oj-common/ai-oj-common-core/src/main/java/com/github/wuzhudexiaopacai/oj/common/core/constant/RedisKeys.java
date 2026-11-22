@@ -22,6 +22,16 @@ public class RedisKeys {
     public static final String USER_TOKENS = "auth:user:tokens:";
 
     /**
+     * 登录失败计数：+ username，达到阈值后短时锁定登录
+     */
+    public static final String LOGIN_FAIL = "auth:login:fail:";
+
+    /**
+     * 注册频率计数：+ ip，限制单 IP 单位时间内注册次数
+     */
+    public static final String REGISTER_IP = "auth:register:ip:";
+
+    /**
      * 图形验证码：+ uuid
      */
     public static final String CAPTCHA = "auth:captcha:";
