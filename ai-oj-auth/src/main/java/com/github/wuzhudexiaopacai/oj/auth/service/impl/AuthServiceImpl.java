@@ -16,6 +16,7 @@ import com.github.wuzhudexiaopacai.oj.auth.mapper.SysUserMapper;
 import com.github.wuzhudexiaopacai.oj.auth.mapper.SysUserRoleMapper;
 import com.github.wuzhudexiaopacai.oj.auth.mq.LoginLogProducer;
 import com.github.wuzhudexiaopacai.oj.auth.service.AuthService;
+import com.github.wuzhudexiaopacai.oj.auth.service.TokenSessionService;
 import com.github.wuzhudexiaopacai.oj.auth.service.UserService;
 import com.github.wuzhudexiaopacai.oj.auth.vo.CaptchaVO;
 import com.github.wuzhudexiaopacai.oj.auth.vo.LoginVO;
@@ -29,7 +30,6 @@ import com.github.wuzhudexiaopacai.oj.common.core.util.JwtUtils;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -67,11 +67,7 @@ public class AuthServiceImpl implements AuthService {
 
     private final LoginLogProducer loginLogProducer;
 
-    /**
-     * 令牌有效期（分钟），黑名单保留时长与之对齐，确保覆盖旧令牌剩余生命周期
-     */
-    @Value("${ai-oj.jwt.expire-minutes:720}")
-    private long expireMinutes;
+    private final TokenSessionService tokenSessionService;
 
     @Override
     public CaptchaVO captcha() {
@@ -146,7 +142,7 @@ public class AuthServiceImpl implements AuthService {
         Asserts.notNull(user, "用户不存在");
         Asserts.isTrue(Objects.equals(user.getStatus(), AuthConstants.STATUS_ENABLE), "账号已被禁用，请联系管理员");
         // 旧令牌进黑名单，按数据库当前权限重新签发
-        blacklist(oldUser.getTokenId());
+        tokenSessionService.revoke(oldUser.getId(), oldUser.getTokenId());
         UserInfoVO userInfo = userService.buildUserInfo(user);
         return new LoginVO(generateToken(user, userInfo), userInfo);
     }
@@ -158,7 +154,7 @@ public class AuthServiceImpl implements AuthService {
         }
         try {
             LoginUser loginUser = jwtUtils.parseToken(token);
-            blacklist(loginUser.getTokenId());
+            tokenSessionService.revoke(loginUser.getId(), loginUser.getTokenId());
         } catch (JwtException | IllegalArgumentException e) {
             // 令牌已失效视为已登出，保持接口幂等
             log.debug("登出时令牌已失效：{}", e.getMessage());
@@ -188,15 +184,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 令牌加入黑名单（保留时长 = 令牌有效期，覆盖其剩余生命周期）
-     */
-    private void blacklist(String tokenId) {
-        stringRedisTemplate.opsForValue().set(RedisKeys.TOKEN_BLACKLIST + tokenId, "1",
-                expireMinutes, TimeUnit.MINUTES);
-    }
-
-    /**
-     * 构建 LoginUser 并签发 JWT（权限 = 角色编码 + 权限标识）
+     * 构建 LoginUser 并签发 JWT（权限 = 角色编码 + 权限标识），同时登记到用户令牌索引
      */
     private String generateToken(SysUser user, UserInfoVO userInfo) {
         List<String> authorities = new ArrayList<>(userInfo.getRoles());
@@ -207,6 +195,9 @@ public class AuthServiceImpl implements AuthService {
                 .nickname(user.getNickname())
                 .authorities(authorities)
                 .build();
-        return jwtUtils.generateToken(loginUser);
+        String token = jwtUtils.generateToken(loginUser);
+        // 记录 jti，供禁用/删除账号时批量失效
+        tokenSessionService.register(user.getId(), loginUser.getTokenId());
+        return token;
     }
 }

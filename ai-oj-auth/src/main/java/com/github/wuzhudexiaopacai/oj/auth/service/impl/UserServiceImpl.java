@@ -21,6 +21,7 @@ import com.github.wuzhudexiaopacai.oj.auth.mapper.SysRoleMapper;
 import com.github.wuzhudexiaopacai.oj.auth.mapper.SysRolePermissionMapper;
 import com.github.wuzhudexiaopacai.oj.auth.mapper.SysUserMapper;
 import com.github.wuzhudexiaopacai.oj.auth.mapper.SysUserRoleMapper;
+import com.github.wuzhudexiaopacai.oj.auth.service.TokenSessionService;
 import com.github.wuzhudexiaopacai.oj.auth.service.UserService;
 import com.github.wuzhudexiaopacai.oj.auth.vo.UserAdminVO;
 import com.github.wuzhudexiaopacai.oj.auth.vo.UserInfoVO;
@@ -64,6 +65,8 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
 
     private final RedisTemplate<String, Object> redisTemplate;
+
+    private final TokenSessionService tokenSessionService;
 
     @Override
     public UserInfoVO getCurrentUserInfo() {
@@ -201,6 +204,10 @@ public class UserServiceImpl implements UserService {
             replaceUserRoles(exist.getId(), request.getRoleIds());
         }
         evictUserCache(exist.getId());
+        // 禁用账号时立即失效其全部已签发令牌，避免封禁后仍可用至过期
+        if (Objects.equals(request.getStatus(), AuthConstants.STATUS_DISABLE)) {
+            tokenSessionService.revokeAll(exist.getId());
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -211,6 +218,8 @@ public class UserServiceImpl implements UserService {
         userMapper.deleteById(id);
         userRoleMapper.physicalDeleteByUserId(id);
         evictUserCache(id);
+        // 删除账号后其令牌必须立即失效
+        tokenSessionService.revokeAll(id);
     }
 
     @Transactional(rollbackFor = Exception.class)

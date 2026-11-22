@@ -17,6 +17,11 @@ public class RedisKeys {
     public static final String TOKEN_BLACKLIST = "auth:token:blacklist:";
 
     /**
+     * 用户已签发 Token 索引（jti 集合）：+ userId，用于禁用/删除账号时批量失效
+     */
+    public static final String USER_TOKENS = "auth:user:tokens:";
+
+    /**
      * 图形验证码：+ uuid
      */
     public static final String CAPTCHA = "auth:captcha:";
