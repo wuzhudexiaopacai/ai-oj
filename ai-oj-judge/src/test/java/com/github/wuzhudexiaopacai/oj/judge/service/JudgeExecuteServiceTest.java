@@ -14,13 +14,17 @@ import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
+import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeRequest;
+import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeEvent;
 import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeStateMachineService;
 import com.github.wuzhudexiaopacai.oj.judge.websocket.JudgeWsPushService;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -30,6 +34,10 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +48,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -101,6 +110,18 @@ class JudgeExecuteServiceTest {
 
     @Mock
     private JudgeWsPushService judgeWsPushService;
+
+    /**
+     * 真实有界线程池（守护线程），验证用例文件并行拉取
+     */
+    @Spy
+    private ExecutorService judgeRemoteReadExecutor = new ThreadPoolExecutor(
+            2, 4, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(100),
+            runnable -> {
+                Thread thread = new Thread(runnable, "judge-remote-read-test");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     @InjectMocks
     private JudgeExecuteService judgeExecuteService;
@@ -177,7 +198,57 @@ class JudgeExecuteServiceTest {
         assertNull(JudgeExecuteService.truncateUtf8(null, 10));
     }
 
+    @Test
+    void caseFilesShouldBeLoadedBeforeSandboxCall() {
+        JudgeSandbox sandbox = sandboxOf("sandbox-a");
+        stubSubmissionFlow(List.of(sandbox));
+        ProblemJudgeDTO problem = problemWithOneCase();
+        JudgeCaseDTO judgeCase = problem.getCases().get(0);
+        // 内联内容为空、对象存储 key 非空：模拟大用例保存在 MinIO
+        judgeCase.setInput(null);
+        judgeCase.setInputFile("cases/1.in");
+        judgeCase.setOutput(null);
+        judgeCase.setOutputFile("cases/1.out");
+        when(problemFeignClient.getJudgeInfo(anyLong())).thenReturn(Result.ok(problem));
+        when(fileFeignClient.getContent("cases/1.in")).thenReturn(Result.ok("1 2\n"));
+        when(fileFeignClient.getContent("cases/1.out")).thenReturn(Result.ok("3\n"));
+        when(sandboxLoadStrategy.select(anyList())).thenReturn(sandbox);
+        when(sandboxClient.judge(anyString(), any()))
+                .thenThrow(new WebClientResponseException(400, "Bad Request", HttpHeaders.EMPTY, null, null));
+
+        assertDoesNotThrow(() -> judgeExecuteService.execute(SUBMISSION_ID));
+
+        ArgumentCaptor<SandboxJudgeRequest> captor = ArgumentCaptor.forClass(SandboxJudgeRequest.class);
+        verify(sandboxClient).judge(anyString(), captor.capture());
+        assertEquals("1 2\n", captor.getValue().cases().get(0).input());
+        assertEquals("3\n", captor.getValue().cases().get(0).expectedOutput());
+    }
+
+    @Test
+    void caseFileLoadFailureShouldAbortBeforeSandbox() {
+        stubLockAndSubmission();
+        ProblemJudgeDTO problem = problemWithOneCase();
+        JudgeCaseDTO judgeCase = problem.getCases().get(0);
+        judgeCase.setInput(null);
+        judgeCase.setInputFile("cases/missing.in");
+        when(problemFeignClient.getJudgeInfo(anyLong())).thenReturn(Result.ok(problem));
+        when(fileFeignClient.getContent("cases/missing.in")).thenReturn(Result.failed("对象不存在"));
+        when(judgeSubmissionMapper.updateById(any(JudgeSubmission.class))).thenReturn(1);
+
+        assertDoesNotThrow(() -> judgeExecuteService.execute(SUBMISSION_ID));
+
+        // 用例内容缺失不能进入评测，且失败按可重试处理（不落终态）
+        verifyNoInteractions(sandboxClient);
+        verify(judgeSubmissionMapper).updateById(any(JudgeSubmission.class));
+        verify(stateMachineService, never()).sendEvent(any(), eq(JudgeEvent.COMPLETE), any());
+    }
+
     private void stubSubmissionFlow(List<JudgeSandbox> sandboxes) {
+        stubLockAndSubmission();
+        when(sandboxRegistry.listAvailable()).thenReturn(sandboxes);
+    }
+
+    private void stubLockAndSubmission() {
         when(redissonClient.getLock(anyString())).thenReturn(executeLock);
         try {
             when(executeLock.tryLock(anyLong(), any())).thenReturn(true);
@@ -187,7 +258,6 @@ class JudgeExecuteServiceTest {
         when(executeLock.isHeldByCurrentThread()).thenReturn(true);
         when(judgeSubmissionMapper.selectById(anyLong())).thenReturn(pendingSubmission());
         when(problemFeignClient.getJudgeInfo(anyLong())).thenReturn(Result.ok(problemWithOneCase()));
-        when(sandboxRegistry.listAvailable()).thenReturn(sandboxes);
     }
 
     private JudgeSubmission pendingSubmission() {

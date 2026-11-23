@@ -48,6 +48,9 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -90,6 +93,11 @@ public class JudgeExecuteService {
     private final ProblemFeignClient problemFeignClient;
 
     private final FileFeignClient fileFeignClient;
+
+    /**
+     * 远程读并行执行器（有界线程池），用于并行拉取用例文件
+     */
+    private final ExecutorService judgeRemoteReadExecutor;
 
     private final SandboxLoadStrategy sandboxLoadStrategy;
 
@@ -204,17 +212,50 @@ public class JudgeExecuteService {
         ProblemJudgeDTO problem = result.getData();
 
         // 用例内容补全：input 为空且 inputFile 非空 → 从 MinIO 拉取（output 同理）
-        if (problem.getCases() != null) {
-            for (JudgeCaseDTO judgeCase : problem.getCases()) {
-                if (StrUtil.isBlank(judgeCase.getInput()) && StrUtil.isNotBlank(judgeCase.getInputFile())) {
-                    judgeCase.setInput(loadFileContent(judgeCase.getInputFile()));
-                }
-                if (StrUtil.isBlank(judgeCase.getOutput()) && StrUtil.isNotBlank(judgeCase.getOutputFile())) {
-                    judgeCase.setOutput(loadFileContent(judgeCase.getOutputFile()));
-                }
+        fillCaseContent(problem.getCases());
+        return problem;
+    }
+
+    /**
+     * 并行补全用例输入/输出内容
+     * <p>
+     * 用例文件全部存放在 MinIO，串行拉取会让判题启动耗时随用例数线性增长；
+     * 每个文件相互独立，使用有界线程池并行拉取。任一失败即整题失败，
+     * 并保持原异常语义（业务异常原样抛出，其余运行时异常原样上抛）。
+     *
+     * @param cases 评测用例
+     */
+    private void fillCaseContent(List<JudgeCaseDTO> cases) {
+        if (cases == null || cases.isEmpty()) {
+            return;
+        }
+        List<CompletableFuture<Void>> futures = new ArrayList<>(cases.size() * 2);
+        for (JudgeCaseDTO judgeCase : cases) {
+            if (StrUtil.isBlank(judgeCase.getInput()) && StrUtil.isNotBlank(judgeCase.getInputFile())) {
+                String objectKey = judgeCase.getInputFile();
+                futures.add(CompletableFuture
+                        .supplyAsync(() -> loadFileContent(objectKey), judgeRemoteReadExecutor)
+                        .thenAccept(judgeCase::setInput));
+            }
+            if (StrUtil.isBlank(judgeCase.getOutput()) && StrUtil.isNotBlank(judgeCase.getOutputFile())) {
+                String objectKey = judgeCase.getOutputFile();
+                futures.add(CompletableFuture
+                        .supplyAsync(() -> loadFileContent(objectKey), judgeRemoteReadExecutor)
+                        .thenAccept(judgeCase::setOutput));
             }
         }
-        return problem;
+        if (futures.isEmpty()) {
+            return;
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new BizException("拉取用例文件失败：" + cause.getMessage());
+        }
     }
 
     /**
