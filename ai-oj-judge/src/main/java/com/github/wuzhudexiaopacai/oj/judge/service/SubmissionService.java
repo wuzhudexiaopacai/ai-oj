@@ -32,10 +32,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -66,6 +69,11 @@ public class SubmissionService {
     private final ProblemFeignClient problemFeignClient;
 
     private final FileFeignClient fileFeignClient;
+
+    /**
+     * 远程读并行执行器（有界线程池），用于并行回填题目简要信息
+     */
+    private final ExecutorService judgeRemoteReadExecutor;
 
     /**
      * 题目简要信息本地缓存上限：题目数可能持续增长，必须限制容量避免堆内存无限膨胀
@@ -118,7 +126,57 @@ public class SubmissionService {
             });
         }
         Page<JudgeSubmission> page = judgeSubmissionMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
-        return PageResult.of(page, this::toPageVO);
+        Map<Long, ProblemBriefDTO> briefs = loadProblemBriefs(page.getRecords());
+        return PageResult.of(page, submission -> toPageVO(submission, briefs));
+    }
+
+    /**
+     * 并行回填本页题目的简要信息
+     * <p>
+     * 缓存未命中的题目相互独立，串行远程调用会让分页耗时随行数增长；
+     * 使用有界线程池并行拉取，失败仍按原逻辑降级为不展示题号/标题。
+     *
+     * @param records 本页提交记录
+     * @return 题目 ID 到简要信息的映射（缺失即降级，不包含失败项）
+     */
+    private Map<Long, ProblemBriefDTO> loadProblemBriefs(List<JudgeSubmission> records) {
+        Map<Long, ProblemBriefDTO> briefs = new LinkedHashMap<>();
+        if (records == null || records.isEmpty()) {
+            return briefs;
+        }
+        List<Long> missing = new ArrayList<>();
+        for (JudgeSubmission submission : records) {
+            Long problemId = submission.getProblemId();
+            if (problemId == null || missing.contains(problemId)) {
+                continue;
+            }
+            ProblemBriefDTO cached = problemBriefCache.get(problemId);
+            if (cached != null) {
+                briefs.put(problemId, cached);
+            } else {
+                missing.add(problemId);
+            }
+        }
+        if (missing.isEmpty()) {
+            return briefs;
+        }
+        List<CompletableFuture<ProblemBriefDTO>> futures = new ArrayList<>(missing.size());
+        try {
+            for (Long problemId : missing) {
+                futures.add(CompletableFuture.supplyAsync(() -> briefOf(problemId), judgeRemoteReadExecutor));
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } catch (Exception e) {
+            log.warn("并行回填题目信息失败，降级为不展示题号/标题", e);
+        }
+        // 已完成的结果逐个取回；未完成或失败的按 null 降级
+        for (int i = 0; i < futures.size(); i++) {
+            ProblemBriefDTO brief = futures.get(i).getNow(null);
+            if (brief != null) {
+                briefs.put(missing.get(i), brief);
+            }
+        }
+        return briefs;
     }
 
     /**
@@ -322,12 +380,12 @@ public class SubmissionService {
                 .build();
     }
 
-    private SubmissionPageVO toPageVO(JudgeSubmission submission) {
+    private SubmissionPageVO toPageVO(JudgeSubmission submission, Map<Long, ProblemBriefDTO> briefs) {
         SubmissionPageVO vo = new SubmissionPageVO();
         BeanUtils.copyProperties(submission, vo);
         vo.setStatusDesc(JudgeStatusEnum.fromCode(submission.getStatus()).getDesc());
-        // 回填题号/标题，失败不影响列表主体展示
-        ProblemBriefDTO brief = briefOf(submission.getProblemId());
+        // 回填题号/标题（已并行预取），缺失不影响列表主体展示
+        ProblemBriefDTO brief = briefs.get(submission.getProblemId());
         if (brief != null) {
             vo.setProblemKey(brief.getProblemKey());
             vo.setProblemTitle(brief.getTitle());
