@@ -10,6 +10,23 @@ spring:
       eager: true
       transport:
         dashboard: sentinel-dashboard:8858
+    # Feign 超时：默认 connect 10s / read 60s 过长，远程服务抖动时会长占线程，
+    # 拖慢并行远程读（用例文件、题目信息回填）与判题主链路，此处按接口体量分级收紧
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+          # 题目判题信息含全部用例与 SPJ 源码，体量较大
+          problemFeignClient:
+            read-timeout: 10000
+          # 比赛成绩记录随参赛人数增长
+          judgeFeignClient:
+            read-timeout: 10000
+          # 大用例文件内容（单文件上限 10MB）经 MinIO 读取，单独放宽
+          fileFeignClient:
+            read-timeout: 15000
   threads:
     virtual:
       # JDK21 虚拟线程全局开启（Web/Tomcat 与异步任务受益）
