@@ -65,15 +65,21 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                 ? traceHeader
                 : UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
-        // 无论是否白名单，外部请求一律剥离内部调用头与身份头，防止伪造内网身份
+        // 无论是否白名单，外部请求一律剥离内部调用头、身份头与网关令牌，防止伪造内网身份
         // 身份头只允许由本过滤器在 JWT 校验通过后注入；白名单匿名请求若不剥离，可伪造任意用户与权限
+        String gatewayToken = securityProperties.getGatewayToken();
         ServerHttpRequest sanitized = request.mutate()
                 .headers(headers -> {
                     headers.remove(CommonConstants.HEADER_INTERNAL_CALL);
                     headers.remove(CommonConstants.HEADER_USER_ID);
                     headers.remove(CommonConstants.HEADER_USER_NAME);
                     headers.remove(CommonConstants.HEADER_AUTHORITIES);
+                    headers.remove(CommonConstants.HEADER_GATEWAY_TOKEN);
                     headers.set(CommonConstants.HEADER_TRACE_ID, traceId);
+                    // 注入信任令牌：下游服务据此确认身份头确实来自网关，直连业务端口无法伪造
+                    if (StringUtils.hasText(gatewayToken)) {
+                        headers.set(CommonConstants.HEADER_GATEWAY_TOKEN, gatewayToken);
+                    }
                 })
                 .build();
 

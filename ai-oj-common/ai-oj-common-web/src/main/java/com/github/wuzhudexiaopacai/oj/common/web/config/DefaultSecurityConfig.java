@@ -6,6 +6,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.result.ResultCode;
 import com.github.wuzhudexiaopacai.oj.common.web.filter.HeaderAuthFilter;
 import com.github.wuzhudexiaopacai.oj.common.web.filter.InternalCallGuardFilter;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -47,8 +48,8 @@ public class DefaultSecurityConfig {
     }
 
     @Bean
-    public HeaderAuthFilter headerAuthFilter() {
-        return new HeaderAuthFilter();
+    public HeaderAuthFilter headerAuthFilter(@Value("${ai-oj.security.gateway-token:}") String gatewayToken) {
+        return new HeaderAuthFilter(gatewayToken);
     }
 
     /**

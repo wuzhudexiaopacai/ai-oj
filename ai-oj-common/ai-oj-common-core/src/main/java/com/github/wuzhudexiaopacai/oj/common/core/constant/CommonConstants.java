@@ -27,6 +27,11 @@ public class CommonConstants {
     public static final String HEADER_AUTHORITIES = "X-User-Authorities";
 
     /**
+     * 网关注入的信任令牌头：业务服务据此确认身份头来自网关，而非直连业务端口伪造
+     */
+    public static final String HEADER_GATEWAY_TOKEN = "X-Gateway-Token";
+
+    /**
      * 内部服务调用标识头（仅内网/Feign 使用，网关会剥离外部传入的该头）
      */
     public static final String HEADER_INTERNAL_CALL = "X-Internal-Call";

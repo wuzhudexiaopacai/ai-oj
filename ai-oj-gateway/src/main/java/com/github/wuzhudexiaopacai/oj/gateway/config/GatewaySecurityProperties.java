@@ -25,4 +25,10 @@ public class GatewaySecurityProperties {
      * 无需认证即可访问的 Ant 风格路径列表
      */
     private List<String> whiteList = new ArrayList<>();
+
+    /**
+     * 网关注入给下游的信任令牌，业务服务 HeaderAuthFilter 校验通过后才采信身份头；
+     * 为空表示不校验（仅限本地调试，生产必须配置）
+     */
+    private String gatewayToken;
 }

@@ -80,6 +80,21 @@ class AuthGlobalFilterTest {
         assertEquals("user", headers.getFirst(CommonConstants.HEADER_AUTHORITIES));
     }
 
+    @Test
+    void forgedGatewayTokenShouldBeReplacedByConfiguredToken() {
+        when(securityProperties.getWhiteList()).thenReturn(List.of("/api/problem/**"));
+        when(securityProperties.getGatewayToken()).thenReturn("trusted-token");
+        AuthGlobalFilter filter = new AuthGlobalFilter(jwtUtils, redisTemplate, securityProperties);
+
+        MockServerHttpRequest request = MockServerHttpRequest.get("/api/problem/1")
+                .header(CommonConstants.HEADER_GATEWAY_TOKEN, "forged-token")
+                .build();
+
+        HttpHeaders headers = capture(filter, MockServerWebExchange.from(request)).getRequest().getHeaders();
+
+        assertEquals("trusted-token", headers.getFirst(CommonConstants.HEADER_GATEWAY_TOKEN));
+    }
+
     private ServerWebExchange capture(AuthGlobalFilter filter, ServerWebExchange exchange) {
         AtomicReference<ServerWebExchange> captured = new AtomicReference<>();
         filter.filter(exchange, ex -> {

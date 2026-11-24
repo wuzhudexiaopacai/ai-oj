@@ -24,7 +24,9 @@ public class FeignRelayConfig {
     private static final List<String> RELAY_HEADERS = List.of(
             CommonConstants.HEADER_USER_ID,
             CommonConstants.HEADER_USER_NAME,
-            CommonConstants.HEADER_AUTHORITIES
+            CommonConstants.HEADER_AUTHORITIES,
+            // 下游服务需要校验网关信任令牌才采信身份头，服务间调用必须一并透传
+            CommonConstants.HEADER_GATEWAY_TOKEN
     );
 
     @Bean

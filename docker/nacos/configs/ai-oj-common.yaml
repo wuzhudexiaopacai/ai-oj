@@ -81,6 +81,10 @@ ai-oj:
     # base64("ai-oj-secret-key-2026-wuzhudexiaopacai")，HS256 要求密钥 ≥ 32 字节
     secret: YWktb2otc2VjcmV0LWtleS0yMDI2LXd1emh1ZGV4aWFvcGFjYWk=
     expire-minutes: 720
+  security:
+    # 网关注入下游的信任令牌：业务服务校验通过后才采信 X-User-Id 等身份头，
+    # 防止绕过网关直连业务端口伪造身份；生产通过 GATEWAY_TOKEN 注入，置空表示不校验（仅限本地调试）
+    gateway-token: ${GATEWAY_TOKEN:ai-oj-gateway-token-2026}
 
 mybatis-plus:
   configuration:
