@@ -2,7 +2,9 @@ package com.github.wuzhudexiaopacai.oj.judge.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.wuzhudexiaopacai.oj.api.dto.JudgeCaseDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemBriefDTO;
+import com.github.wuzhudexiaopacai.oj.api.dto.ProblemJudgeDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.FileFeignClient;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
 import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
@@ -194,5 +196,73 @@ class SubmissionServiceTest {
         assertEquals(1, result.getRecords().size());
         assertNull(result.getRecords().get(0).getProblemKey());
         assertNull(result.getRecords().get(0).getProblemTitle());
+    }
+
+    @Test
+    void detailPreviewsFailedCaseFilesWithSingleReadPerObjectKey() {
+        JudgeSubmission submission = submissionOf(5L, 7L, 40);
+        submission.setStatus(JudgeStatusEnum.WRONG_ANSWER.getCode());
+        submission.setProblemId(300L);
+        when(judgeSubmissionMapper.selectById(5L)).thenReturn(submission);
+        when(judgeCaseResultMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                caseResultOf(1, JudgeStatusEnum.WRONG_ANSWER),
+                caseResultOf(2, JudgeStatusEnum.WRONG_ANSWER)));
+        when(problemFeignClient.getJudgeInfo(300L)).thenReturn(Result.ok(judgeInfoOf(
+                fileCaseOf(1, "files/1.in", "files/1.out"),
+                // 两个用例共用同一输入文件，验证按 objectKey 去重后只读一次
+                fileCaseOf(2, "files/1.in", "files/2.out"))));
+        when(fileFeignClient.getContent("files/1.in")).thenReturn(Result.ok("1 2"));
+        when(fileFeignClient.getContent("files/1.out")).thenReturn(Result.ok("3"));
+        when(fileFeignClient.getContent("files/2.out")).thenReturn(Result.ok("4"));
+
+        SubmissionDetailVO vo = submissionService.detail(5L);
+
+        assertEquals("1 2", vo.getCases().get(0).getInputPreview());
+        assertEquals("3", vo.getCases().get(0).getExpectedPreview());
+        assertEquals("1 2", vo.getCases().get(1).getInputPreview());
+        assertEquals("4", vo.getCases().get(1).getExpectedPreview());
+        verify(fileFeignClient, times(1)).getContent("files/1.in");
+    }
+
+    @Test
+    void detailDegradesOnlyFailedCaseFilePreview() {
+        JudgeSubmission submission = submissionOf(6L, 7L, 40);
+        submission.setStatus(JudgeStatusEnum.WRONG_ANSWER.getCode());
+        submission.setProblemId(400L);
+        when(judgeSubmissionMapper.selectById(6L)).thenReturn(submission);
+        when(judgeCaseResultMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                caseResultOf(1, JudgeStatusEnum.WRONG_ANSWER)));
+        JudgeCaseDTO inlineOutputCase = fileCaseOf(1, "files/broken.in", null);
+        inlineOutputCase.setOutput("7");
+        when(problemFeignClient.getJudgeInfo(400L))
+                .thenReturn(Result.ok(judgeInfoOf(inlineOutputCase)));
+        when(fileFeignClient.getContent("files/broken.in")).thenThrow(new RuntimeException("MinIO 不可用"));
+
+        SubmissionDetailVO vo = assertDoesNotThrow(() -> submissionService.detail(6L));
+
+        // 文件读取失败仅该预览为空，内联内容与其他字段照常返回
+        assertNull(vo.getCases().get(0).getInputPreview());
+        assertEquals("7", vo.getCases().get(0).getExpectedPreview());
+    }
+
+    private JudgeCaseResult caseResultOf(int seq, JudgeStatusEnum status) {
+        JudgeCaseResult caseResult = new JudgeCaseResult();
+        caseResult.setSeq(seq);
+        caseResult.setStatus(status.getCode());
+        return caseResult;
+    }
+
+    private JudgeCaseDTO fileCaseOf(int seq, String inputFile, String outputFile) {
+        JudgeCaseDTO judgeCase = new JudgeCaseDTO();
+        judgeCase.setSeq(seq);
+        judgeCase.setInputFile(inputFile);
+        judgeCase.setOutputFile(outputFile);
+        return judgeCase;
+    }
+
+    private ProblemJudgeDTO judgeInfoOf(JudgeCaseDTO... cases) {
+        ProblemJudgeDTO judgeInfo = new ProblemJudgeDTO();
+        judgeInfo.setCases(List.of(cases));
+        return judgeInfo;
     }
 }

@@ -35,8 +35,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
@@ -260,29 +262,71 @@ public class SubmissionService {
             log.warn("回显失败用例时拉取题目用例失败 problemId={}", problemId, e);
             return;
         }
+        // 大数据用例需逐个读 MinIO，先并行预读再回填，避免详情接口串行等待
+        Map<String, String> fileContents = loadCaseFileContents(failedItems, caseMap);
         for (SubmissionDetailVO.CaseResultItem item : failedItems) {
             JudgeCaseDTO judgeCase = caseMap.get(item.getSeq());
             if (judgeCase == null) {
                 continue;
             }
-            item.setInputPreview(casePreview(judgeCase.getInput(), judgeCase.getInputFile()));
-            item.setExpectedPreview(casePreview(judgeCase.getOutput(), judgeCase.getOutputFile()));
+            item.setInputPreview(casePreview(judgeCase.getInput(), judgeCase.getInputFile(), fileContents));
+            item.setExpectedPreview(casePreview(judgeCase.getOutput(), judgeCase.getOutputFile(), fileContents));
         }
     }
 
     /**
-     * 用例内容预览：内联内容优先，大数据走 MinIO 文件读取，超长截断
+     * 并行预读失败用例对应的 MinIO 文件内容：同一 objectKey 只读一次，失败降级为 null
      */
-    private String casePreview(String inlineContent, String objectKey) {
+    private Map<String, String> loadCaseFileContents(List<SubmissionDetailVO.CaseResultItem> failedItems,
+                                                    Map<Integer, JudgeCaseDTO> caseMap) {
+        Set<String> objectKeys = new LinkedHashSet<>();
+        for (SubmissionDetailVO.CaseResultItem item : failedItems) {
+            JudgeCaseDTO judgeCase = caseMap.get(item.getSeq());
+            if (judgeCase == null) {
+                continue;
+            }
+            if (!StringUtils.hasText(judgeCase.getInput()) && StringUtils.hasText(judgeCase.getInputFile())) {
+                objectKeys.add(judgeCase.getInputFile());
+            }
+            if (!StringUtils.hasText(judgeCase.getOutput()) && StringUtils.hasText(judgeCase.getOutputFile())) {
+                objectKeys.add(judgeCase.getOutputFile());
+            }
+        }
+        Map<String, CompletableFuture<String>> futures = new LinkedHashMap<>();
+        try {
+            for (String objectKey : objectKeys) {
+                futures.put(objectKey, CompletableFuture.supplyAsync(
+                        () -> readCaseFileContent(objectKey), judgeRemoteReadExecutor));
+            }
+            CompletableFuture.allOf(futures.values().toArray(CompletableFuture[]::new)).join();
+        } catch (Exception e) {
+            log.warn("并行读取用例文件失败，按已完成结果降级", e);
+        }
+        Map<String, String> contents = new LinkedHashMap<>();
+        futures.forEach((objectKey, future) -> contents.put(objectKey, future.getNow(null)));
+        return contents;
+    }
+
+    /**
+     * 读取 MinIO 用例文件内容，失败返回 null（不阻断详情展示）
+     */
+    private String readCaseFileContent(String objectKey) {
+        try {
+            Result<String> fileResult = fileFeignClient.getContent(objectKey);
+            return fileResult == null || !fileResult.isSuccess() ? null : fileResult.getData();
+        } catch (Exception e) {
+            log.warn("读取用例文件失败 objectKey={}", objectKey, e);
+            return null;
+        }
+    }
+
+    /**
+     * 用例内容预览：内联内容优先，大数据走预读的 MinIO 内容，超长截断
+     */
+    private String casePreview(String inlineContent, String objectKey, Map<String, String> fileContents) {
         String content = inlineContent;
         if (!StringUtils.hasText(content) && StringUtils.hasText(objectKey)) {
-            try {
-                Result<String> fileResult = fileFeignClient.getContent(objectKey);
-                content = fileResult == null || !fileResult.isSuccess() ? null : fileResult.getData();
-            } catch (Exception e) {
-                log.warn("读取用例文件失败 objectKey={}", objectKey, e);
-                return null;
-            }
+            content = fileContents.get(objectKey);
         }
         if (content == null) {
             return null;
