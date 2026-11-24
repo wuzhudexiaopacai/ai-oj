@@ -607,6 +607,7 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 2. 白名单放行（`/api/auth/login|register|captcha|refresh`、`/api/problem/**`、`/api/contest/**`、`/ws/**`）
 3. JWT 解析 + Redis Token 黑名单（`auth:token:blacklist:{jti}`）校验，注销/封禁立即失效
 4. 向下游注入身份头，业务服务 `HeaderAuthFilter` 直接消费，不重复验签
+5. 业务服务 `InternalCallGuardFilter` 统一校验 `/internal/**` 的 `X-Internal-Call: true`（Feign 自动注入），缺失直接拒绝，防止业务端口被直连时越权调用内部接口
 
 白名单路径**带 token 时仍解析身份**，保证比赛报名等写接口能识别用户。
 

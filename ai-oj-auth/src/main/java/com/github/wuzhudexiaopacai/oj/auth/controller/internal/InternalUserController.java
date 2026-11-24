@@ -3,25 +3,20 @@ package com.github.wuzhudexiaopacai.oj.auth.controller.internal;
 import com.github.wuzhudexiaopacai.oj.api.dto.UserBriefDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.AuthFeignClient;
 import com.github.wuzhudexiaopacai.oj.auth.service.UserService;
-import com.github.wuzhudexiaopacai.oj.common.core.constant.CommonConstants;
-import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
-import com.github.wuzhudexiaopacai.oj.common.core.result.ResultCode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;
 
 /**
- * 用户服务内部接口（仅供服务间 Feign 调用，外部请求会被网关剥离内部标识头）
+ * 用户服务内部接口（仅供服务间 Feign 调用，外部请求会被网关剥离内部标识头，
+ * 且 common-web 的 InternalCallGuardFilter 会统一拒绝直连访问）
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -45,19 +40,6 @@ public class InternalUserController implements AuthFeignClient {
     @Override
     @PostMapping("/batch-brief")
     public Result<List<UserBriefDTO>> batchGetUserBrief(@RequestBody List<Long> userIds) {
-        checkInternalCall();
         return Result.ok(userService.batchGetUserBrief(userIds));
-    }
-
-    /**
-     * 校验内部调用标识（防止绕过网关直连伪造）
-     */
-    private void checkInternalCall() {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        HttpServletRequest request = attributes == null ? null : attributes.getRequest();
-        String internalCall = request == null ? null : request.getHeader(CommonConstants.HEADER_INTERNAL_CALL);
-        if (!"true".equals(internalCall)) {
-            throw new BizException(ResultCode.FORBIDDEN);
-        }
     }
 }

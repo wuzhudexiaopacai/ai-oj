@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
 import com.github.wuzhudexiaopacai.oj.common.core.result.ResultCode;
 import com.github.wuzhudexiaopacai.oj.common.web.filter.HeaderAuthFilter;
+import com.github.wuzhudexiaopacai.oj.common.web.filter.InternalCallGuardFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -46,6 +49,18 @@ public class DefaultSecurityConfig {
     @Bean
     public HeaderAuthFilter headerAuthFilter() {
         return new HeaderAuthFilter();
+    }
+
+    /**
+     * 内部接口守卫：/internal/** 免登录，但必须携带内部调用标识头
+     */
+    @Bean
+    public FilterRegistrationBean<InternalCallGuardFilter> internalCallGuardFilter() {
+        FilterRegistrationBean<InternalCallGuardFilter> registration =
+                new FilterRegistrationBean<>(new InternalCallGuardFilter());
+        registration.addUrlPatterns("/internal/*");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
+        return registration;
     }
 
     @Bean
