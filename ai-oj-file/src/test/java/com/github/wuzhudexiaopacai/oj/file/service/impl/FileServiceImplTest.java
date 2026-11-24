@@ -4,11 +4,15 @@ import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.BizException;
 import com.github.wuzhudexiaopacai.oj.file.config.FileUploadProperties;
 import com.github.wuzhudexiaopacai.oj.file.config.MinioConfig;
+import com.github.wuzhudexiaopacai.oj.file.dto.FileMergeRequest;
 import com.github.wuzhudexiaopacai.oj.file.dto.UploadInitRequest;
 import com.github.wuzhudexiaopacai.oj.file.entity.FileRecord;
 import com.github.wuzhudexiaopacai.oj.file.mapper.FileRecordMapper;
 import com.github.wuzhudexiaopacai.oj.file.vo.UploadInitVO;
+import io.minio.ComposeObjectArgs;
 import io.minio.MinioClient;
+import io.minio.RemoveObjectArgs;
+import io.minio.RemoveObjectsArgs;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,11 +23,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.messaging.Message;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -67,6 +73,9 @@ class FileServiceImplTest {
 
     @Mock
     private HashOperations<String, Object, Object> hashOperations;
+
+    @Mock
+    private SetOperations<String, Object> setOperations;
 
     @Mock
     private RocketMQTemplate rocketMQTemplate;
@@ -114,6 +123,48 @@ class FileServiceImplTest {
         assertTrue(vo.getUploaded());
         verify(fileRecordMapper, never()).updateById(any(FileRecord.class));
         verify(fileRecordMapper, never()).insert(any(FileRecord.class));
+    }
+
+    @Test
+    void mergeShouldDeleteTempChunksInSingleBatch() throws Exception {
+        FileRecord uploading = recordOf(11L, FileServiceImpl.STATUS_UPLOADING);
+        uploading.setFileName("solution.zip");
+        uploading.setChunkTotal(2);
+        when(fileRecordMapper.selectOne(any())).thenReturn(uploading);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(setOperations.members("file:chunks:" + MD5)).thenReturn(Set.of(1, 2));
+        when(minioConfig.getBucket()).thenReturn("ai-oj");
+        when(minioClient.removeObjects(any(RemoveObjectsArgs.class))).thenReturn(List.of());
+
+        UploadInitVO vo = fileService.merge(mergeRequestOf());
+
+        assertTrue(vo.getUploaded());
+        verify(minioClient).composeObject(any(ComposeObjectArgs.class));
+        // 临时块一次性批量删除，不再逐片往返
+        verify(minioClient).removeObjects(any(RemoveObjectsArgs.class));
+        verify(minioClient, never()).removeObject(any(RemoveObjectArgs.class));
+        ArgumentCaptor<FileRecord> captor = ArgumentCaptor.forClass(FileRecord.class);
+        verify(fileRecordMapper).updateById(captor.capture());
+        assertEquals(Integer.valueOf(FileServiceImpl.STATUS_COMPLETED), captor.getValue().getStatus());
+    }
+
+    @Test
+    void mergeShouldSucceedEvenWhenTempChunkCleanupFails() throws Exception {
+        FileRecord uploading = recordOf(12L, FileServiceImpl.STATUS_UPLOADING);
+        uploading.setFileName("solution.zip");
+        uploading.setChunkTotal(1);
+        when(fileRecordMapper.selectOne(any())).thenReturn(uploading);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(setOperations.members("file:chunks:" + MD5)).thenReturn(Set.of(1));
+        when(minioConfig.getBucket()).thenReturn("ai-oj");
+        when(minioClient.removeObjects(any(RemoveObjectsArgs.class)))
+                .thenThrow(new RuntimeException("MinIO 删除不可用"));
+
+        UploadInitVO vo = fileService.merge(mergeRequestOf());
+
+        // 合并结果已生成，临时块清理失败不影响上传成功
+        assertTrue(vo.getUploaded());
+        verify(fileRecordMapper).updateById(any(FileRecord.class));
     }
 
     @Test
@@ -176,6 +227,12 @@ class FileServiceImplTest {
         request.setFileName("solution.zip");
         request.setSize(1024L);
         request.setChunkTotal(3);
+        return request;
+    }
+
+    private FileMergeRequest mergeRequestOf() {
+        FileMergeRequest request = new FileMergeRequest();
+        request.setMd5(MD5);
         return request;
     }
 }

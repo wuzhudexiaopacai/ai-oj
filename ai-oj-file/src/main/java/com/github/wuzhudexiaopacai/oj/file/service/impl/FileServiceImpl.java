@@ -30,9 +30,12 @@ import io.minio.ListObjectsArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
+import io.minio.RemoveObjectsArgs;
 import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
 import io.minio.http.Method;
+import io.minio.messages.DeleteError;
+import io.minio.messages.DeleteObject;
 import io.minio.messages.Item;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -299,12 +302,24 @@ public class FileServiceImpl implements FileService {
                     .object(objectKey)
                     .sources(sources)
                     .build());
-            // 删除临时块
+            // 批量删除临时块（单次请求，避免逐片往返 MinIO）
+            List<DeleteObject> chunkObjects = new ArrayList<>(record.getChunkTotal());
             for (int seq = 1; seq <= record.getChunkTotal(); seq++) {
-                minioClient.removeObject(RemoveObjectArgs.builder()
-                        .bucket(minioConfig.getBucket())
-                        .object(chunkObjectKey(md5, seq))
-                        .build());
+                chunkObjects.add(new DeleteObject(chunkObjectKey(md5, seq)));
+            }
+            // 删除失败只记录日志：合并结果已生成，临时块残留不影响文件可用性
+            try {
+                for (io.minio.Result<DeleteError> deleteResult : minioClient.removeObjects(
+                        RemoveObjectsArgs.builder()
+                                .bucket(minioConfig.getBucket())
+                                .objects(chunkObjects)
+                                .build())) {
+                    DeleteError error = deleteResult.get();
+                    log.warn("临时分片删除失败: md5={}, object={}, message={}",
+                            md5, error.objectName(), error.message());
+                }
+            } catch (Exception e) {
+                log.warn("清理临时分片失败: md5={}", md5, e);
             }
         } catch (Exception e) {
             log.error("分片合并失败: md5={}", md5, e);
