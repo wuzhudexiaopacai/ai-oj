@@ -168,6 +168,23 @@ class FileServiceImplTest {
     }
 
     @Test
+    void cleanUploadShouldDeleteTempChunksInSingleBatch() throws Exception {
+        when(fileRecordMapper.selectById(13L)).thenReturn(recordOf(13L, FileServiceImpl.STATUS_UPLOADING));
+        when(minioClient.listObjects(any())).thenReturn(List.of(
+                tempChunkOf("chunks/" + MD5 + "/1"),
+                tempChunkOf("chunks/" + MD5 + "/2")));
+        when(minioConfig.getBucket()).thenReturn("ai-oj");
+        when(minioClient.removeObjects(any(RemoveObjectsArgs.class))).thenReturn(List.of());
+
+        fileService.cleanUpload(13L, MD5);
+
+        // 超时清理同样走批量删除，不再逐块往返
+        verify(minioClient).removeObjects(any(RemoveObjectsArgs.class));
+        verify(minioClient, never()).removeObject(any(RemoveObjectArgs.class));
+        verify(fileRecordMapper).updateById(any(FileRecord.class));
+    }
+
+    @Test
     void presignedUrlShouldRejectOtherUser() throws Exception {
         login(7L, List.of("USER"));
         when(fileRecordMapper.selectById(9L)).thenReturn(completedRecord(9L, 1L));
@@ -234,5 +251,13 @@ class FileServiceImplTest {
         FileMergeRequest request = new FileMergeRequest();
         request.setMd5(MD5);
         return request;
+    }
+
+    /**
+     * 构造 listObjects 返回的临时块条目（Item 为抽象类，使用匿名子类）
+     */
+    private io.minio.Result<io.minio.messages.Item> tempChunkOf(String objectName) {
+        return new io.minio.Result<>(new io.minio.messages.Item(objectName) {
+        });
     }
 }

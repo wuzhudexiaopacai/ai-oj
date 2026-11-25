@@ -460,17 +460,26 @@ public class FileServiceImpl implements FileService {
         if (record == null || !Integer.valueOf(STATUS_UPLOADING).equals(record.getStatus())) {
             return;
         }
-        // 清理 MinIO 临时块（listObjects 惰性求值，遍历内逐条删除）
+        // 清理 MinIO 临时块（一次批量删除，避免逐块往返；失败仍抛出让消息重投）
         try {
+            List<DeleteObject> chunkObjects = new ArrayList<>();
             Iterable<io.minio.Result<Item>> items = minioClient.listObjects(ListObjectsArgs.builder()
                     .bucket(minioConfig.getBucket())
                     .prefix(CHUNK_PREFIX + md5 + "/")
                     .build());
             for (io.minio.Result<Item> item : items) {
-                minioClient.removeObject(RemoveObjectArgs.builder()
-                        .bucket(minioConfig.getBucket())
-                        .object(item.get().objectName())
-                        .build());
+                chunkObjects.add(new DeleteObject(item.get().objectName()));
+            }
+            if (!chunkObjects.isEmpty()) {
+                for (io.minio.Result<DeleteError> deleteResult : minioClient.removeObjects(
+                        RemoveObjectsArgs.builder()
+                                .bucket(minioConfig.getBucket())
+                                .objects(chunkObjects)
+                                .build())) {
+                    DeleteError error = deleteResult.get();
+                    log.warn("临时分片删除失败: md5={}, object={}, message={}",
+                            md5, error.objectName(), error.message());
+                }
             }
         } catch (Exception e) {
             log.error("清理临时块失败: fileId={}, md5={}", fileId, md5, e);
