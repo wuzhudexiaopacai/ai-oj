@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -72,6 +73,39 @@ class ResultOutboxResendJobTest {
         assertEquals(1, outbox.getRetryCount());
         assertTrue(outbox.getNextRetryTime().isAfter(before), "失败后应延后排期重试");
         verify(judgeOutboxMapper).updateById(outbox);
+    }
+
+    @Test
+    void shouldStopBatchWhenMqUnavailable() throws Exception {
+        JudgeOutbox first = outboxOf("submit-1");
+        JudgeOutbox second = outboxOf("submit-2");
+        when(judgeOutboxMapper.selectList(any())).thenReturn(List.of(first, second));
+        when(rocketMQTemplate.syncSend(eq(MqConstants.JUDGE_RESULT_TOPIC), any(Message.class), eq(5000L)))
+                .thenThrow(new MessagingException("mq down"));
+
+        resultOutboxResendJob.executeInternal(null);
+
+        // MQ 不可用时终止本轮，避免逐条等待发送超时
+        verify(rocketMQTemplate).syncSend(eq(MqConstants.JUDGE_RESULT_TOPIC), any(Message.class), eq(5000L));
+        verify(judgeOutboxMapper).updateById(first);
+        verify(judgeOutboxMapper, never()).updateById(second);
+        assertEquals(1, first.getRetryCount());
+        assertEquals(0, second.getRetryCount());
+    }
+
+    @Test
+    void malformedPayloadShouldNotAbortBatch() throws Exception {
+        JudgeOutbox broken = outboxOf("submit-1");
+        broken.setPayload("not-a-json");
+        JudgeOutbox healthy = outboxOf("submit-2");
+        when(judgeOutboxMapper.selectList(any())).thenReturn(List.of(broken, healthy));
+
+        resultOutboxResendJob.executeInternal(null);
+
+        // 脏数据只退避自身，后续记录继续补投
+        assertEquals(1, broken.getRetryCount());
+        assertEquals(JudgeOutbox.STATUS_PENDING, broken.getStatus());
+        assertEquals(JudgeOutbox.STATUS_SENT, healthy.getStatus());
     }
 
     @Test
