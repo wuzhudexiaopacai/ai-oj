@@ -6,6 +6,7 @@ import com.github.wuzhudexiaopacai.oj.ai.dto.TaskSubmitDTO;
 import com.github.wuzhudexiaopacai.oj.ai.service.AiTaskService;
 import com.github.wuzhudexiaopacai.oj.ai.vo.TaskStatusVO;
 import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
+import com.github.wuzhudexiaopacai.oj.common.core.dto.LoginUser;
 import com.github.wuzhudexiaopacai.oj.common.core.exception.Asserts;
 import com.github.wuzhudexiaopacai.oj.common.web.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -43,17 +45,19 @@ public class AiTaskServiceImpl implements AiTaskService {
 
     @Override
     public String submitTask(TaskSubmitDTO req) {
-        SecurityUtils.requireLogin();
+        LoginUser loginUser = SecurityUtils.requireLogin();
         Map<String, String> params = buildParams(req);
 
         String taskId = UUID.randomUUID().toString().replace("-", "");
         String taskKey = AiConstants.AI_TASK_KEY + taskId;
         // 先落 PENDING 状态，再投递 MQ（避免消费快于状态写入）
         redisTemplate.opsForValue().set(taskKey,
-                new TaskStatusVO(taskId, AiConstants.TASK_PENDING, null), TASK_TTL_DAYS, TimeUnit.DAYS);
+                new TaskStatusVO(taskId, loginUser.getId(), AiConstants.TASK_PENDING, null),
+                TASK_TTL_DAYS, TimeUnit.DAYS);
 
         AiTaskMessage message = AiTaskMessage.builder()
                 .taskId(taskId)
+                .userId(loginUser.getId())
                 .taskType(req.getTaskType())
                 .params(params)
                 .build();
@@ -73,10 +77,13 @@ public class AiTaskServiceImpl implements AiTaskService {
 
     @Override
     public TaskStatusVO getTask(String taskId) {
-        SecurityUtils.requireLogin();
+        Long userId = SecurityUtils.requireLogin().getId();
         Object cached = redisTemplate.opsForValue().get(AiConstants.AI_TASK_KEY + taskId);
         Asserts.notNull(cached, "任务不存在或已过期");
-        return (TaskStatusVO) cached;
+        TaskStatusVO status = (TaskStatusVO) cached;
+        // 仅返回本人任务，避免凭他人 taskId 读取评审/出题结果（统一提示，不暴露任务是否存在）
+        Asserts.isTrue(Objects.equals(status.getUserId(), userId), "任务不存在或已过期");
+        return status;
     }
 
     /**

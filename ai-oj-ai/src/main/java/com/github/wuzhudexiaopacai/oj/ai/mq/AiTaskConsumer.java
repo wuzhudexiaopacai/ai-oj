@@ -58,13 +58,14 @@ public class AiTaskConsumer implements RocketMQListener<AiTaskMessage> {
             String prompt = strategyFactory.getStrategy(message.getTaskType()).buildPrompt(message.getParams());
             String result = chatClient.prompt().messages(new UserMessage(prompt)).call().content();
             redisTemplate.opsForValue().set(taskKey,
-                    new TaskStatusVO(message.getTaskId(), AiConstants.TASK_SUCCESS, result),
+                    new TaskStatusVO(message.getTaskId(), message.getUserId(), AiConstants.TASK_SUCCESS, result),
                     TASK_TTL_DAYS, TimeUnit.DAYS);
             log.info("AI 任务执行成功: taskId={}, taskType={}", message.getTaskId(), message.getTaskType());
         } catch (Exception e) {
             log.error("AI 任务执行失败: {}", message, e);
             redisTemplate.opsForValue().set(taskKey,
-                    new TaskStatusVO(message.getTaskId(), AiConstants.TASK_FAILED, "任务执行失败: " + e.getMessage()),
+                    new TaskStatusVO(message.getTaskId(), message.getUserId(), AiConstants.TASK_FAILED,
+                            "任务执行失败: " + e.getMessage()),
                     TASK_TTL_DAYS, TimeUnit.DAYS);
             // 重抛交由 RocketMQ 重试（FAILED 状态不阻断重试，成功后会覆盖）
             throw e;

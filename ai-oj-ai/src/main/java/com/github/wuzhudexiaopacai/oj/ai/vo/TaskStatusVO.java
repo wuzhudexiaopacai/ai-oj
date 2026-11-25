@@ -26,6 +26,12 @@ public class TaskStatusVO implements Serializable {
     private String taskId;
 
     /**
+     * 提交任务的用户 ID（查询时校验归属，避免凭 taskId 读取他人结果）
+     */
+    @Schema(description = "提交任务的用户 ID", example = "10001")
+    private Long userId;
+
+    /**
      * 状态：PENDING/SUCCESS/FAILED
      */
     @Schema(description = "任务状态：PENDING 待执行 / SUCCESS 成功 / FAILED 失败", example = "PENDING")

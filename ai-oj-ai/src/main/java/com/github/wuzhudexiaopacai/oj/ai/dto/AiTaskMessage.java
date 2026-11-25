@@ -26,6 +26,11 @@ public class AiTaskMessage implements Serializable {
     private String taskId;
 
     /**
+     * 提交任务的用户 ID（用于结果归属校验）
+     */
+    private Long userId;
+
+    /**
      * 任务类型：generate/review
      */
     private String taskType;
