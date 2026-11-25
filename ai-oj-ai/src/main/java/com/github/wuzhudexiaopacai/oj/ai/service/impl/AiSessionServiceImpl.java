@@ -23,6 +23,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -81,6 +82,7 @@ public class AiSessionServiceImpl implements AiSessionService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteSession(Long sessionId) {
         requireOwnedSession(sessionId);
         sessionMapper.deleteById(sessionId);
