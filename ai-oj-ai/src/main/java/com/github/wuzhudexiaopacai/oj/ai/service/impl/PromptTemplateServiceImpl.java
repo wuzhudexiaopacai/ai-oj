@@ -11,6 +11,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 /**
@@ -53,8 +55,24 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
             entity.setName(name);
         }
         promptTemplateMapper.updateById(entity);
-        // 缓存失效，下次读取回源 DB
+        // 事务提交后再失效缓存：提交前删除会被并发读回源到旧数据并重新写回缓存
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    evictCache(code);
+                }
+            });
+        } else {
+            evictCache(code);
+        }
+        log.info("提示词模板已更新: code={}", code);
+    }
+
+    /**
+     * 失效模板缓存，下次读取回源 DB
+     */
+    private void evictCache(String code) {
         redisTemplate.opsForHash().delete(AiConstants.PROMPT_TEMPLATE_HASH, code);
-        log.info("提示词模板已更新并失效缓存: code={}", code);
     }
 }
