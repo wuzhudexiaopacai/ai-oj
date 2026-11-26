@@ -35,6 +35,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -250,7 +252,18 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void evictUserCache(Long userId) {
-        redisTemplate.delete(RedisKeys.USER_INFO + userId);
+        String cacheKey = RedisKeys.USER_INFO + userId;
+        // 事务内延迟到提交后失效，避免并发读回源旧数据重新写回缓存；无事务时立即删除
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    redisTemplate.delete(cacheKey);
+                }
+            });
+        } else {
+            redisTemplate.delete(cacheKey);
+        }
     }
 
     @Override

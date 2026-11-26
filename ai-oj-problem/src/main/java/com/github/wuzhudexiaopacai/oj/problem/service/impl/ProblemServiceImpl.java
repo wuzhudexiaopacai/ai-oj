@@ -50,6 +50,8 @@ import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -539,11 +541,31 @@ public class ProblemServiceImpl implements ProblemService {
     }
 
     /**
-     * 写操作后处理：发 MQ 同步 ES + 主动删除详情缓存
+     * 写操作后处理：发 MQ 同步 ES + 事务提交后删除详情缓存
+     * <p>
+     * 缓存删除必须延迟到事务提交后：若在提交前删除，并发读会回源到旧的已提交数据并重新写回缓存，
+     * 导致缓存长期持有旧值直到 TTL 过期。MQ 发送保留在提交前，失败可触发回滚以保持 DB 与 ES 一致。
      */
     private void afterWrite(Long problemId, String problemKey, ProblemSyncMessage message) {
         rocketMQTemplate.syncSend(MqConstants.PROBLEM_SYNC_TOPIC, message);
-        redisTemplate.delete(RedisKeys.PROBLEM_DETAIL + problemKey);
+        evictDetailCacheAfterCommit(problemKey);
+    }
+
+    /**
+     * 注册事务提交回调失效详情缓存；无事务上下文时立即删除（兜底）
+     */
+    private void evictDetailCacheAfterCommit(String problemKey) {
+        String cacheKey = RedisKeys.PROBLEM_DETAIL + problemKey;
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    redisTemplate.delete(cacheKey);
+                }
+            });
+        } else {
+            redisTemplate.delete(cacheKey);
+        }
     }
 
     /**

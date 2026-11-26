@@ -34,6 +34,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -425,11 +427,24 @@ public class ContestServiceImpl implements ContestService {
 
     /**
      * 失效比赛详情缓存
+     * <p>
+     * 在事务内调用时延迟到提交后失效：提交前删除会让并发读回源旧数据并重新写回缓存，导致缓存长期不更新。
+     * 无事务上下文（如定时任务、消息消费）时立即删除。
      *
      * @param contestId 比赛 ID
      */
     public void evictDetailCache(Long contestId) {
-        redisTemplate.delete(CONTEST_INFO_CACHE + contestId);
+        String cacheKey = CONTEST_INFO_CACHE + contestId;
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    redisTemplate.delete(cacheKey);
+                }
+            });
+        } else {
+            redisTemplate.delete(cacheKey);
+        }
     }
 
     /**
