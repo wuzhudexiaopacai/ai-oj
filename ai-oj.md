@@ -70,7 +70,7 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 - **题库**：题号/标题关键字、难度、标签多选筛选，Elasticsearch 全文检索（不可用时自动降级为数据库 LIKE）
 - **做题**：Monaco 编辑器、语言模板、样例与自测、运行结果逐用例展示、错误用例下载；题面支持 KaTeX 数学公式与代码高亮，样例/用例/提交代码一键复制
 - **提交**：WebSocket 实时判题进度，断线自动降级为轮询；提交记录表格支持点击行展开详情抽屉（源代码 + 代码长度 + 逐用例判题结果 + 耗时内存）
-- **题解**：题目页「题解」标签页浏览/发布解题思路（Markdown + KaTeX 渲染），支持点赞与取消点赞，点赞数由 Redis Set 去重后原子累加
+- **题解**：题目页「题解」标签页浏览/发布解题思路（Markdown + KaTeX 渲染），支持点赞与取消点赞；点赞关系落库（`solution_like` 表，按用户去重），`solution.like_count` 原子 ±1 维护，取消点赞按实际移除结果减计数
 - **比赛**：ACM / OI 两种赛制、公开 / 私有 / 密码赛、赛内倒计时、封榜、实时排行榜（图表 + 排名双视图，标记「我」）
 - **个人中心**：资料编辑、头像上传、我的提交、我的比赛，自动统计提交总数与通过题数
 - **AI 助手**：题目页可停靠悬浮球（拖拽移动、靠边收纳不遮挡题面），题目讲解、代码评审、提示词模板、流式输出，支持多场景会话
@@ -337,6 +337,7 @@ docker compose up -d mysql redis nacos rocketmq-namesrv rocketmq-broker minio mi
 
 # 2. 发布 Nacos 配置
 pwsh -NoProfile -File docker/nacos/import-configs.ps1
+#    同时会把 Sentinel 流控规则发布到 Nacos 的 SENTINEL_GROUP（规则内容见 docker/nacos/sentinel/）
 
 # 3. 在 IDE 中运行目标服务（如 JudgeApplication）
 #    - 环境变量 NACOS_ADDR=localhost:8848
@@ -352,7 +353,8 @@ npm run dev        # http://localhost:5173
 
 本地直连注意事项：
 
-- Nacos 配置中的 `mysql`、`redis`、`rocketmq-namesrv`、`minio`、`seata-server`、`sentinel-dashboard` 均为**容器名**。IDE 在宿主机运行时需在 Nacos 控制台把 `ai-oj-common.yaml` 与各服务配置中的 host 改为 `localhost`，或用本地 `application-local.yml` 覆盖数据源/Redis 配置。
+- Nacos 配置中的 `mysql`、`redis`、`rocketmq-namesrv`、`minio`、`seata-server`、`sentinel-dashboard` 均为**容器名**。IDE 在宿主机运行时需在 Nacos 控制台把 `ai-oj-common.yaml` 与各服务配置中的 host 改为 `localhost`，或用本地 `application-local.yml` 覆盖数据源/Redis 配置（Sentinel 同理，需把 `spring.cloud.sentinel.transport.dashboard` 改为 `localhost:8858`）。
+- Redis 已开启密码认证，IDE 直连时需设置环境变量 `REDIS_PASSWORD=redis123456`（与 compose 默认值一致）；MySQL/MinIO 同理可用 `MYSQL_ROOT_PASSWORD`、`MINIO_ROOT_USER`、`MINIO_ROOT_PASSWORD` 覆盖。
 - `vite.config.js` 的 `/api`、`/ws` 代理目标默认 `http://localhost:8088`（compose 暴露的网关宿主端口）；若在本地 IDE 直接启动网关（默认 8080），需同步改代理目标。
 - `/files` 代理直连 MinIO `http://localhost:9000/ai-oj-public`。
 
@@ -465,6 +467,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 - **进度通道**：WebSocket `/ws/judge` 为主，Redis `judge:progress:{userId}:{submitId}` 缓存 + HTTP 轮询兜底
 - **卡死补偿**：Quartz 集群模式（JDBC 持久化，`QRTZ_*`），`0 * * * * ?` 每分钟扫描非终态且超时的提交，重试 3 次后置 `SYSTEM_ERROR` 并广播
 - **沙箱调度**：最小负载优先（Redis key `judge:sandbox:load:{sandboxKey}`，带 10 分钟 TTL，进程崩溃后自动归零；全部实例满载时仍选最低负载者排队），失败节点拉黑 30s，最多重试 3 次（4xx 请求错误不拉黑）；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度
+- **并行预读**：提交分页并行回填题目简要信息；判题启动并行拉取多份测试用例文件；提交详情并行预读失败用例文件，缩短列表、详情与判题启动的加载耗时
 
 ### AI 对话链路（POST + SSE）
 
@@ -602,6 +605,10 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - 列表按查询条件 JSON 的 MD5 做缓存 Key（`problem:list:{md5}`）
 - ES 检索失败时自动降级为 DB `LIKE` 查询
 
+### 缓存失效的事务时机
+
+题目详情、比赛信息、用户资料、AI 提示词模板等缓存的失效，统一注册到 `TransactionSynchronization.afterCommit`——只有事务提交成功后才删缓存。原来在业务方法内（事务提交前）删缓存，一旦事务回滚，缓存已被清空，紧接着的读请求会回源拿到回滚前的旧值并重新缓存，造成"改了不生效"的短暂窗口。无事务上下文（如 MQ 消费、定时任务）时直接删除。
+
 ### 网关鉴权与身份透传
 
 1. 剥离客户端伪造的 `X-User-Id / X-User-Name / X-User-Authorities / X-Internal-Call` 等内部头
@@ -666,6 +673,7 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 | 问题 | 现象 | 原因与处理 |
 |---|---|---|
 | Nacos 热刷新不生效 | 改了数据源/Redis/MQ 配置但服务仍连旧地址 | `@RefreshScope` 只覆盖了 ChatModel 等少量 Bean；连接池、Quartz、Feign 等构造期注入的配置变更后必须重启服务 |
+| 改了题目/比赛但详情短暂返回旧内容 | 写操作后缓存偶发不失效或读到旧值 | 缓存失效曾在事务提交前执行，事务回滚后缓存已被删，读请求回源又把旧值重新缓存；已统一延迟到 `afterCommit`，事务提交成功才删缓存 |
 | 雪花 ID 精度丢失 | 前端提示「比赛不存在」 | 19 位 Long 被 JS 解析丢精度；common-web 已统一序列化为字符串，前端统一按字符串比较 |
 | 沙箱把 RE/TLE 误判为 SYSTEM_ERROR | 非 0 退出码全部变成系统错误 | bollard 0.17 把容器非 0 退出码当 Docker 错误；`docker.rs` 的 `wait_exit` 捕获 `DockerContainerWaitError { code, .. }` 还原真实退出码 |
 | 前端白屏 `Cannot access 'xx' before initialization` | 打包后循环依赖 | `request.js` 顶层 import router/store 导致；已改为直接读 localStorage + 动态 import router，并在 Vite 中配置 `manualChunks`（monaco 独立拆包） |
@@ -692,7 +700,8 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 - [ ] 判题沙箱支持更多语言（Rust 模板、C#、Kotlin）
 - [ ] AI 出题支持多轮改写与批量生成（结合异步任务 `AI_OJ_AI_TASK`）
 - [ ] 题目导入模板与批量导入的版本兼容校验
-- [ ] 生产化部署：Nacos MySQL 存储 + 鉴权、外部化密钥、健康检查与限流接入 Sentinel
+- [x] 限流接入 Sentinel（Dashboard 实时监控 + Nacos `SENTINEL_GROUP` 规则持久化；判题间隔、AI 每用户次数等业务级限制仍用 Redisson）
+- [ ] 生产化部署：Nacos MySQL 存储 + 鉴权、外部化密钥、健康检查与资源限制
 - [ ] 可选的 Prometheus + Grafana 指标面板
 
 ---
