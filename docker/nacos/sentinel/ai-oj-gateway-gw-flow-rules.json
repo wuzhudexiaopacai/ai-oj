@@ -1,0 +1,9 @@
+[
+  {"resource": "ai-oj-auth", "resourceMode": 0, "grade": 1, "count": 200, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0},
+  {"resource": "ai-oj-problem", "resourceMode": 0, "grade": 1, "count": 300, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0},
+  {"resource": "ai-oj-judge", "resourceMode": 0, "grade": 1, "count": 300, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0},
+  {"resource": "ai-oj-contest", "resourceMode": 0, "grade": 1, "count": 200, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0},
+  {"resource": "ai-oj-file", "resourceMode": 0, "grade": 1, "count": 100, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0},
+  {"resource": "ai-oj-ai", "resourceMode": 0, "grade": 1, "count": 60, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0},
+  {"resource": "ai-oj-log", "resourceMode": 0, "grade": 1, "count": 60, "intervalSec": 1, "controlBehavior": 0, "burst": 0, "maxQueueingTimeoutMs": 0}
+]

@@ -157,7 +157,9 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 | 部署 | Docker Compose、Nginx 1.27 |
 | 工具库 | jjwt 0.12.6、Hutool 5.8.32、Knife4j 4.5.0、EasyExcel 4.0.3、Lombok 1.18.34 |
 
-> Sentinel Dashboard 1.8.8 随 compose 启动，但代码未接入 Sentinel 客户端；判题/AI 的实际业务限流由 Redisson 实现。
+> Sentinel 1.8.8 已接入：业务服务与网关均作为客户端注册到 Dashboard（8858）实时监控；流控规则持久化在 Nacos
+> 的 `SENTINEL_GROUP`（dataId `<应用名>-flow-rules`、网关 `ai-oj-gateway-gw-flow-rules`），导入配置后即可生效。
+> 判题间隔、AI 每用户次数等业务级限制仍由 Redisson 实现。
 
 ---
 
@@ -335,6 +337,7 @@ docker compose up -d mysql redis nacos rocketmq-namesrv rocketmq-broker minio mi
 
 # 2. 发布 Nacos 配置
 pwsh -NoProfile -File docker/nacos/import-configs.ps1
+#    同时会把 Sentinel 流控规则发布到 Nacos 的 SENTINEL_GROUP（规则内容见 docker/nacos/sentinel/）
 
 # 3. 在 IDE 中运行目标服务（如 JudgeApplication）
 #    - 环境变量 NACOS_ADDR=localhost:8848
@@ -350,7 +353,7 @@ npm run dev        # http://localhost:5173
 
 本地直连注意事项：
 
-- Nacos 配置中的 `mysql`、`redis`、`rocketmq-namesrv`、`minio`、`seata-server`、`sentinel-dashboard` 均为**容器名**。IDE 在宿主机运行时需在 Nacos 控制台把 `ai-oj-common.yaml` 与各服务配置中的 host 改为 `localhost`，或用本地 `application-local.yml` 覆盖数据源/Redis 配置。
+- Nacos 配置中的 `mysql`、`redis`、`rocketmq-namesrv`、`minio`、`seata-server`、`sentinel-dashboard` 均为**容器名**。IDE 在宿主机运行时需在 Nacos 控制台把 `ai-oj-common.yaml` 与各服务配置中的 host 改为 `localhost`，或用本地 `application-local.yml` 覆盖数据源/Redis 配置（Sentinel 同理，需把 `spring.cloud.sentinel.transport.dashboard` 改为 `localhost:8858`）。
 - Redis 已开启密码认证，IDE 直连时需设置环境变量 `REDIS_PASSWORD=redis123456`（与 compose 默认值一致）；MySQL/MinIO 同理可用 `MYSQL_ROOT_PASSWORD`、`MINIO_ROOT_USER`、`MINIO_ROOT_PASSWORD` 覆盖。
 - `vite.config.js` 的 `/api`、`/ws` 代理目标默认 `http://localhost:8088`（compose 暴露的网关宿主端口）；若在本地 IDE 直接启动网关（默认 8080），需同步改代理目标。
 - `/files` 代理直连 MinIO `http://localhost:9000/ai-oj-public`。
@@ -678,7 +681,7 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 | 自测/用例校验返回系统错误 | 沙箱 `/run` 响应字段接不到 | Rust 沙箱与 Java DTO 契约字段名不一致；已统一为 `stdin` / `stdout` / `stderr` |
 | 镜像拉取报 magic number mismatch | Docker Desktop 启动异常 | 关闭 Docker Desktop 的 containerd 镜像存储（Settings → General） |
 | 宿主机跑服务连不上 RocketMQ | 能连 NameServer 但发不出消息 | Broker 以容器名 `rocketmq-broker` 注册；宿主机加 hosts 映射或改 `brokerIP1` |
-| Sentinel 控制台没有数据 | Dashboard 一片空白 | 项目未引入 Sentinel 客户端，Dashboard 仅为预留；限流由 Redisson 实现 |
+| Sentinel 控制台没有数据 | Dashboard 一片空白 | 服务需先启动并完成 Nacos 导入；客户端经容器网络 8719 上报，宿主机运行需把 `spring.cloud.sentinel.transport.dashboard` 改为 `localhost:8858` |
 | 首次启动服务全部失败 | 日志提示找不到配置 | 未执行 `docker/nacos/import-configs.ps1`，或执行后未重启业务服务 |
 
 ---

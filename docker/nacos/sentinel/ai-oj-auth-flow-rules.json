@@ -1,0 +1,7 @@
+[
+  {"resource": "/auth/captcha", "limitApp": "default", "grade": 1, "count": 20, "strategy": 0, "controlBehavior": 0, "clusterMode": false},
+  {"resource": "/auth/login", "limitApp": "default", "grade": 1, "count": 10, "strategy": 0, "controlBehavior": 0, "clusterMode": false},
+  {"resource": "/auth/register", "limitApp": "default", "grade": 1, "count": 5, "strategy": 0, "controlBehavior": 0, "clusterMode": false},
+  {"resource": "/auth/refresh", "limitApp": "default", "grade": 1, "count": 30, "strategy": 0, "controlBehavior": 0, "clusterMode": false},
+  {"resource": "/auth/logout", "limitApp": "default", "grade": 1, "count": 30, "strategy": 0, "controlBehavior": 0, "clusterMode": false}
+]

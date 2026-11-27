@@ -20,8 +20,8 @@ import java.math.BigInteger;
  */
 @AutoConfiguration
 @Import({MybatisPlusConfig.class, RedisConfig.class, RedissonConfig.class, JwtConfig.class,
-        DefaultSecurityConfig.class, IdempotentAspect.class, OperationLogAspect.class,
-        GlobalExceptionHandler.class, FeignRelayConfig.class})
+        DefaultSecurityConfig.class, SentinelWebConfig.class, IdempotentAspect.class,
+        OperationLogAspect.class, GlobalExceptionHandler.class, FeignRelayConfig.class})
 public class CommonWebAutoConfiguration {
 
     /**

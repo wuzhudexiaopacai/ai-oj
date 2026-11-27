@@ -5,6 +5,25 @@ server:
 
 spring:
   cloud:
+    # 网关流控规则：按路由 ID / API 分组限流，规则持久化在 Nacos SENTINEL_GROUP
+    sentinel:
+      datasource:
+        gw-flow:
+          nacos:
+            server-addr: ${spring.cloud.nacos.server-addr:nacos:8848}
+            username: ${spring.cloud.nacos.username:nacos}
+            password: ${spring.cloud.nacos.password:nacos}
+            group-id: SENTINEL_GROUP
+            data-id: ai-oj-gateway-gw-flow-rules
+            rule-type: gw-flow
+        gw-api-group:
+          nacos:
+            server-addr: ${spring.cloud.nacos.server-addr:nacos:8848}
+            username: ${spring.cloud.nacos.username:nacos}
+            password: ${spring.cloud.nacos.password:nacos}
+            group-id: SENTINEL_GROUP
+            data-id: ai-oj-gateway-gw-api-group-rules
+            rule-type: gw-api-group
     gateway:
       default-filters:
         # 全链路响应头携带请求ID，便于排障

@@ -157,7 +157,9 @@ AI-OJ 是一个面向学习与工程实践的全栈在线判题平台，采用 *
 | 部署 | Docker Compose、Nginx 1.27 |
 | 工具库 | jjwt 0.12.6、Hutool 5.8.32、Knife4j 4.5.0、EasyExcel 4.0.3、Lombok 1.18.34 |
 
-> Sentinel Dashboard 1.8.8 随 compose 启动，但代码未接入 Sentinel 客户端；判题/AI 的实际业务限流由 Redisson 实现。
+> Sentinel 1.8.8 已接入：业务服务与网关均作为客户端注册到 Dashboard（8858）实时监控；流控规则持久化在 Nacos
+> 的 `SENTINEL_GROUP`（dataId `<应用名>-flow-rules`、网关 `ai-oj-gateway-gw-flow-rules`），导入配置后即可生效。
+> 判题间隔、AI 每用户次数等业务级限制仍由 Redisson 实现。
 
 ---
 
@@ -677,7 +679,7 @@ curl "http://localhost:9200/ai-oj-logs/_search?q=container_name:ai-oj-judge&size
 | 自测/用例校验返回系统错误 | 沙箱 `/run` 响应字段接不到 | Rust 沙箱与 Java DTO 契约字段名不一致；已统一为 `stdin` / `stdout` / `stderr` |
 | 镜像拉取报 magic number mismatch | Docker Desktop 启动异常 | 关闭 Docker Desktop 的 containerd 镜像存储（Settings → General） |
 | 宿主机跑服务连不上 RocketMQ | 能连 NameServer 但发不出消息 | Broker 以容器名 `rocketmq-broker` 注册；宿主机加 hosts 映射或改 `brokerIP1` |
-| Sentinel 控制台没有数据 | Dashboard 一片空白 | 项目未引入 Sentinel 客户端，Dashboard 仅为预留；限流由 Redisson 实现 |
+| Sentinel 控制台没有数据 | Dashboard 一片空白 | 服务需先启动并完成 Nacos 导入；客户端经容器网络 8719 上报，宿主机运行需把 `spring.cloud.sentinel.transport.dashboard` 改为 `localhost:8858` |
 | 首次启动服务全部失败 | 日志提示找不到配置 | 未执行 `docker/nacos/import-configs.ps1`，或执行后未重启业务服务 |
 
 ---

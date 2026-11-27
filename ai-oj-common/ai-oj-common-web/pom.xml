@@ -54,6 +54,20 @@
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
         </dependency>
+        <!-- Sentinel 限流熔断：Dashboard 实时监控 + Nacos 规则持久化（各业务服务共享） -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-alibaba-sentinel-datasource</artifactId>
+        </dependency>
+        <!-- Nacos 规则数据源实现：SCA 数据源组件中为 optional，需显式引入 -->
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-datasource-nacos</artifactId>
+        </dependency>
         <!-- Feign 透传拦截器为可选自动装配，引入方自行添加 openfeign -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>

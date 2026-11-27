@@ -7,9 +7,23 @@ spring:
       username: ${SPRING_CLOUD_NACOS_USERNAME:nacos}
       password: ${SPRING_CLOUD_NACOS_PASSWORD:nacos}
     sentinel:
+      # 启动即连接 Dashboard 并注册规则数据源，不等首次请求
       eager: true
       transport:
-        dashboard: sentinel-dashboard:8858
+        dashboard: ${SENTINEL_DASHBOARD:sentinel-dashboard:8858}
+        # 客户端与 Dashboard 通信端口（容器内独立，可固定端口便于排查）
+        port: 8719
+      # 流控规则持久化到 Nacos：在 Nacos 的 SENTINEL_GROUP 下维护 <应用名>-flow-rules，
+      # 客户端监听变更实时热更新；Dashboard 仅用于实时监控与手动推送
+      datasource:
+        flow:
+          nacos:
+            server-addr: ${spring.cloud.nacos.server-addr:nacos:8848}
+            username: ${spring.cloud.nacos.username:nacos}
+            password: ${spring.cloud.nacos.password:nacos}
+            group-id: SENTINEL_GROUP
+            data-id: ${spring.application.name}-flow-rules
+            rule-type: flow
     # Feign 超时：默认 connect 10s / read 60s 过长，远程服务抖动时会长占线程，
     # 拖慢并行远程读（用例文件、题目信息回填）与判题主链路，此处按接口体量分级收紧
     openfeign:
