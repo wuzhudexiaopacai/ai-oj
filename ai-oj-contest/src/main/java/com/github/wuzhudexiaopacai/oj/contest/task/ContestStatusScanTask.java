@@ -59,12 +59,7 @@ public class ContestStatusScanTask {
             {1, 5, 10, 30, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 1200, 1800, 3600, 7200};
 
     /**
-     * 事件类型：开赛
-     */
-    private static final String EVENT_START = "start";
-
-    /**
-     * 事件类型：结束
+     * 事件类型：结束（仅结束事件需要广播，判题服务据此结算榜单；开赛只做状态迁移与 WebSocket 推送）
      */
     private static final String EVENT_END = "end";
 
@@ -104,8 +99,9 @@ public class ContestStatusScanTask {
         try {
             LocalDateTime now = LocalDateTime.now();
             // 先迁移开赛（SCHEDULED→RUNNING），再迁移结束（RUNNING→ENDED），保证超短比赛两个事件按序发出
+            // 开赛无下游消费者，只做状态迁移与 WebSocket 推送；结束需要广播给判题服务结算榜单
             migrate(now, ContestStatusEnum.SCHEDULED, ContestStatusEnum.RUNNING,
-                    Contest::getStartTime, EVENT_START);
+                    Contest::getStartTime, null);
             migrate(now, ContestStatusEnum.RUNNING, ContestStatusEnum.ENDED,
                     Contest::getEndTime, EVENT_END);
             // 到达封榜时间的进行中比赛冻结一次榜单：封榜快照缺失时排行榜会降级为实时榜，普通用户仍能看到最新结果
@@ -124,7 +120,7 @@ public class ContestStatusScanTask {
      * @param from       源状态
      * @param to         目标状态
      * @param timeGetter 触发时间字段（start_time / end_time）
-     * @param eventType  迁移成功后广播的事件类型
+     * @param eventType  迁移成功后广播的事件类型；为 null 表示不广播（开赛只推送 WebSocket）
      */
     private void migrate(LocalDateTime now, ContestStatusEnum from, ContestStatusEnum to,
                          SFunction<Contest, LocalDateTime> timeGetter, String eventType) {
@@ -151,7 +147,9 @@ public class ContestStatusScanTask {
             if (snapshot != null) {
                 wsPushService.publish(snapshot);
             }
-            sendContestEvent(eventType, contest);
+            if (eventType != null) {
+                sendContestEvent(eventType, contest);
+            }
         }
     }
 
@@ -178,7 +176,7 @@ public class ContestStatusScanTask {
     }
 
     /**
-     * 发送比赛事件消息（topic:tag，消息体 JSON：{"eventType":"start|end","contestId":n,"contestType":0|1,"timestamp":n}）
+     * 发送比赛事件消息（topic:tag，消息体 JSON：{"eventType":"end","contestId":n,"contestType":0|1,"timestamp":n}）
      */
     private void sendContestEvent(String eventType, Contest contest) {
         ContestEventMessage message = new ContestEventMessage();
@@ -189,7 +187,7 @@ public class ContestStatusScanTask {
         try {
             String destination = MqConstants.CONTEST_EVENT_TOPIC + ":" + eventType;
             String payload = objectMapper.writeValueAsString(message);
-            // 结束事件延迟投递，给在途判题留出落库时间；开赛事件保持实时
+            // 结束事件延迟投递，给在途判题留出落库时间
             int delayLevel = EVENT_END.equals(eventType) ? delayLevelOf(settleGraceSeconds) : 0;
             if (delayLevel > 0) {
                 rocketMQTemplate.syncSend(destination, MessageBuilder.withPayload(payload).build(),
