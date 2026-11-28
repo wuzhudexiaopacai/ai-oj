@@ -7,7 +7,6 @@ import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.BizDeadLetterMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.service.JudgeExecuteService;
-import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeStateMachineService;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,9 +40,6 @@ class JudgeDlqConsumerTest {
     private JudgeSubmissionMapper judgeSubmissionMapper;
 
     @Mock
-    private JudgeStateMachineService stateMachineService;
-
-    @Mock
     private JudgeExecuteService judgeExecuteService;
 
     @Spy
@@ -59,8 +55,8 @@ class JudgeDlqConsumerTest {
         submission.setSubmitId("submit-1");
         submission.setStatus(JudgeStatusEnum.JUDGING.getCode());
         when(judgeSubmissionMapper.selectById(1L)).thenReturn(submission);
-        when(stateMachineService.transitionToTerminal(eq(submission), eq(JudgeStatusEnum.SYSTEM_ERROR),
-                anyString())).thenReturn(false);
+        when(judgeExecuteService.transitionToTerminalAndSaveOutbox(eq(submission),
+                eq(JudgeStatusEnum.SYSTEM_ERROR), anyString())).thenReturn(false);
         JudgeSubmitMessage submitMessage = JudgeSubmitMessage.builder()
                 .submitId("submit-1").submissionId(1L).build();
         MessageExt messageExt = new MessageExt();

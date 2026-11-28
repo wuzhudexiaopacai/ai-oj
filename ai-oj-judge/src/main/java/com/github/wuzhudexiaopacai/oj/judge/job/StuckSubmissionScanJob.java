@@ -7,7 +7,6 @@ import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mq.JudgeSubmitMessage;
 import com.github.wuzhudexiaopacai.oj.judge.service.JudgeExecuteService;
-import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeStateMachineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
@@ -35,8 +34,6 @@ import java.util.List;
 public class StuckSubmissionScanJob extends QuartzJobBean {
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
-
-    private final JudgeStateMachineService stateMachineService;
 
     private final JudgeExecuteService judgeExecuteService;
 
@@ -80,8 +77,8 @@ public class StuckSubmissionScanJob extends QuartzJobBean {
                 } else {
                     // 超过重试上限：仅本次成功落库为 SYSTEM_ERROR 才广播；
                     // 若正常判题已并发落为其他终态，不能用内存中的旧记录广播错误结论
-                    if (stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
-                            "判题卡死超过重试上限，由补偿任务置为系统错误")) {
+                    if (judgeExecuteService.transitionToTerminalAndSaveOutbox(submission,
+                            JudgeStatusEnum.SYSTEM_ERROR, "判题卡死超过重试上限，由补偿任务置为系统错误")) {
                         judgeExecuteService.broadcast(submission);
                         log.warn("提交 {} 卡死超限，置为 SYSTEM_ERROR", submission.getSubmitId());
                     }

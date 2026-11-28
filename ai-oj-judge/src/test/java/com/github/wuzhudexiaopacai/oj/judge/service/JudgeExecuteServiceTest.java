@@ -5,7 +5,10 @@ import com.github.wuzhudexiaopacai.oj.api.dto.JudgeCaseDTO;
 import com.github.wuzhudexiaopacai.oj.api.dto.ProblemJudgeDTO;
 import com.github.wuzhudexiaopacai.oj.api.feign.FileFeignClient;
 import com.github.wuzhudexiaopacai.oj.api.feign.ProblemFeignClient;
+import com.github.wuzhudexiaopacai.oj.common.core.constant.MqConstants;
+import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.common.core.result.Result;
+import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeOutbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeCaseResultMapper;
@@ -15,6 +18,7 @@ import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxClient;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxLoadStrategy;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.SandboxRegistry;
 import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeRequest;
+import com.github.wuzhudexiaopacai.oj.judge.sandbox.dto.SandboxJudgeResponse;
 import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeEvent;
 import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeStateMachineService;
 import com.github.wuzhudexiaopacai.oj.judge.websocket.JudgeWsPushService;
@@ -30,6 +34,10 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.nio.charset.StandardCharsets;
@@ -110,6 +118,12 @@ class JudgeExecuteServiceTest {
 
     @Mock
     private JudgeWsPushService judgeWsPushService;
+
+    /**
+     * 真实事务模板 + 空实现事务管理器：只验证编程式事务内逻辑被执行，不依赖数据库
+     */
+    @Spy
+    private TransactionTemplate transactionTemplate = new TransactionTemplate(new NoOpTransactionManager());
 
     /**
      * 真实有界线程池（守护线程），验证用例文件并行拉取
@@ -243,6 +257,30 @@ class JudgeExecuteServiceTest {
         verify(stateMachineService, never()).sendEvent(any(), eq(JudgeEvent.COMPLETE), any());
     }
 
+    @Test
+    void terminalStatusShouldBeSavedWithOutboxInSameTransaction() throws Exception {
+        JudgeSandbox sandbox = sandboxOf("sandbox-a");
+        stubSubmissionFlow(List.of(sandbox));
+        when(sandboxLoadStrategy.select(anyList())).thenReturn(sandbox);
+        when(sandboxClient.judge(anyString(), any())).thenReturn(acceptedResponse());
+        // 第一次查询（终态事务内）不存在 → 写入 Outbox；第二次（广播时）复用该待投递记录
+        when(judgeOutboxMapper.selectOne(any())).thenReturn(null, pendingOutbox());
+        when(judgeOutboxMapper.insert(any(JudgeOutbox.class))).thenReturn(1);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+
+        assertDoesNotThrow(() -> judgeExecuteService.execute(SUBMISSION_ID));
+
+        // 终态迁移与结果消息同事务落库，之后广播复用该记录投递
+        verify(stateMachineService).sendEvent(any(JudgeSubmission.class), eq(JudgeEvent.COMPLETE),
+                eq(JudgeStatusEnum.ACCEPTED));
+        verify(judgeOutboxMapper, times(1)).insert(any(JudgeOutbox.class));
+        verify(rocketMQTemplate).syncSend(eq(MqConstants.JUDGE_RESULT_TOPIC),
+                any(org.springframework.messaging.Message.class), eq(5000L));
+    }
+
+    /**
+     * 用例文件并行拉取（真实有界线程池）
+     */
     private void stubSubmissionFlow(List<JudgeSandbox> sandboxes) {
         stubLockAndSubmission();
         when(sandboxRegistry.listAvailable()).thenReturn(sandboxes);
@@ -293,5 +331,45 @@ class JudgeExecuteServiceTest {
         sandbox.setMaxParallel(2);
         sandbox.setStatus(1);
         return sandbox;
+    }
+
+    private JudgeOutbox pendingOutbox() {
+        JudgeOutbox outbox = new JudgeOutbox();
+        outbox.setSubmitId("submit-1");
+        outbox.setStatus(JudgeOutbox.STATUS_PENDING);
+        return outbox;
+    }
+
+    private SandboxJudgeResponse acceptedResponse() {
+        return new SandboxJudgeResponse(
+                new SandboxJudgeResponse.CompileResult(true, null),
+                "AC", 100,
+                List.of(new SandboxJudgeResponse.CaseResult(1, "AC", 10, 1024, 100, null)));
+    }
+
+    /**
+     * 空事务管理器：编程式事务无数据库依赖，仅验证回调逻辑
+     */
+    private static final class NoOpTransactionManager extends AbstractPlatformTransactionManager {
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+            // no-op
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+            // no-op
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+            // no-op
+        }
     }
 }

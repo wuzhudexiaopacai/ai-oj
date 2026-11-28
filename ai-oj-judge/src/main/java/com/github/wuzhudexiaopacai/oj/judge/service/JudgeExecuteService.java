@@ -41,6 +41,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.nio.charset.StandardCharsets;
@@ -112,6 +114,11 @@ public class JudgeExecuteService {
     private final ObjectMapper objectMapper;
 
     private final JudgeWsPushService judgeWsPushService;
+
+    /**
+     * 编程式事务：用于把「用例明细 + 终态 + 结果 Outbox」放进同一个本地事务
+     */
+    private final TransactionTemplate transactionTemplate;
 
     @Value("${ai-oj.judge.progress-ttl-seconds:3600}")
     private long progressTtlSeconds;
@@ -381,19 +388,29 @@ public class JudgeExecuteService {
             submission.setErrorMessage(truncateUtf8(response.compile().log(), ERROR_MESSAGE_MAX_BYTES));
         }
 
-        // 先写用例明细、后迁移终态：终态一旦落库就不会再重试，
-        // 若明细写入失败则提交会停在 JUDGING 并被重试，避免“有结论但用例明细永久缺失”。
-        // 重试时先删后插，保证明细不重复。
-        judgeCaseResultMapper.delete(new LambdaQueryWrapper<JudgeCaseResult>()
-                .eq(JudgeCaseResult::getSubmissionId, submission.getId()));
-        if (!caseResults.isEmpty()) {
-            // XML 批量插入不触发 MetaObjectHandler 与雪花 ID 填充，手动赋值
-            for (JudgeCaseResult caseResult : caseResults) {
-                caseResult.setId(IdWorker.getId());
+        // 用例明细、终态、结果消息同事务落库：
+        // 1) 先写明细、后迁移终态：终态一旦落库就不会再重试，明细失败则整体回滚，提交停在 JUDGING 被重试，
+        //    避免“有结论但用例明细永久缺失”；重试时先删后插，保证明细不重复；
+        // 2) 结果消息（Outbox）与终态在同一事务提交：进程若在“终态提交成功、消息尚未投递”之间崩溃，
+        //    补偿任务仍能从 Outbox 补投，不会永久丢失题目统计/比赛成绩。
+        transactionTemplate.executeWithoutResult(status -> {
+            judgeCaseResultMapper.delete(new LambdaQueryWrapper<JudgeCaseResult>()
+                    .eq(JudgeCaseResult::getSubmissionId, submission.getId()));
+            if (!caseResults.isEmpty()) {
+                // XML 批量插入不触发 MetaObjectHandler 与雪花 ID 填充，手动赋值
+                for (JudgeCaseResult caseResult : caseResults) {
+                    caseResult.setId(IdWorker.getId());
+                }
+                judgeCaseResultMapper.insertBatch(caseResults);
             }
-            judgeCaseResultMapper.insertBatch(caseResults);
-        }
-        stateMachineService.sendEvent(submission, JudgeEvent.COMPLETE, finalStatus);
+            stateMachineService.sendEvent(submission, JudgeEvent.COMPLETE, finalStatus);
+            try {
+                createOutboxIfAbsent(submission);
+            } catch (Exception e) {
+                // 结果消息落库失败不阻断终态提交（否则会回滚已完成的判题），退化为广播时重写或直接投递
+                log.error("结果消息落本地消息表失败，广播时重试 submitId={}", submission.getSubmitId(), e);
+            }
+        });
         log.info("提交 {} 判题完成 status={} score={}", submission.getSubmitId(), finalStatus, submission.getScore());
     }
 
@@ -404,20 +421,11 @@ public class JudgeExecuteService {
         JudgeStatusEnum status = JudgeStatusEnum.fromCode(submission.getStatus());
 
         // 1. 结果消息广播（题目统计/比赛成绩订阅）
-        JudgeResultMessage resultMessage = JudgeResultMessage.builder()
-                .submitId(submission.getSubmitId())
-                .userId(submission.getUserId())
-                .problemId(submission.getProblemId())
-                .contestId(submission.getContestId())
-                .statusCode(submission.getStatus())
-                .score(submission.getScore())
-                .timeUsed(submission.getTimeUsed())
-                .memoryUsed(submission.getMemoryUsed())
-                .judgeTime(submission.getJudgeTime())
-                .build();
-        // 1. 结果消息先落本地消息表（Outbox），再尝试投递：
-        //    投递失败保留待投递状态，由 ResultOutboxResendJob 退避补投，避免结果永久丢失
-        JudgeOutbox outbox = saveOutbox(submission, resultMessage);
+        JudgeResultMessage resultMessage = buildResultMessage(submission);
+        // 结果消息先落本地消息表（Outbox），再尝试投递：
+        // 正常判题链路已在终态事务内写入 Outbox，此处复用同一条记录；
+        // 投递失败保留待投递状态，由 ResultOutboxResendJob 退避补投，避免结果永久丢失
+        JudgeOutbox outbox = saveOutbox(submission);
         if (outbox == null || !Integer.valueOf(JudgeOutbox.STATUS_SENT).equals(outbox.getStatus())) {
             deliverResult(outbox, resultMessage);
         }
@@ -438,30 +446,83 @@ public class JudgeExecuteService {
     }
 
     /**
+     * 组装结果广播消息
+     */
+    private JudgeResultMessage buildResultMessage(JudgeSubmission submission) {
+        return JudgeResultMessage.builder()
+                .submitId(submission.getSubmitId())
+                .userId(submission.getUserId())
+                .problemId(submission.getProblemId())
+                .contestId(submission.getContestId())
+                .statusCode(submission.getStatus())
+                .score(submission.getScore())
+                .timeUsed(submission.getTimeUsed())
+                .memoryUsed(submission.getMemoryUsed())
+                .judgeTime(submission.getJudgeTime())
+                .build();
+    }
+
+    /**
      * 结果消息落本地消息表；已存在（重复广播）时直接复用原记录
      *
      * @return Outbox 记录，落库失败返回 null（调用方退化为直接投递）
      */
-    private JudgeOutbox saveOutbox(JudgeSubmission submission, JudgeResultMessage resultMessage) {
+    private JudgeOutbox saveOutbox(JudgeSubmission submission) {
         try {
-            JudgeOutbox existing = judgeOutboxMapper.selectOne(new LambdaQueryWrapper<JudgeOutbox>()
-                    .eq(JudgeOutbox::getSubmitId, submission.getSubmitId())
-                    .last("limit 1"));
-            if (existing != null) {
-                return existing;
-            }
-            JudgeOutbox outbox = new JudgeOutbox();
-            outbox.setSubmitId(submission.getSubmitId());
-            outbox.setPayload(objectMapper.writeValueAsString(resultMessage));
-            outbox.setStatus(JudgeOutbox.STATUS_PENDING);
-            outbox.setRetryCount(0);
-            outbox.setNextRetryTime(LocalDateTime.now());
-            judgeOutboxMapper.insert(outbox);
-            return outbox;
+            return createOutboxIfAbsent(submission);
         } catch (Exception e) {
             log.error("结果消息落本地消息表失败，退化为直接投递 submitId={}", submission.getSubmitId(), e);
             return null;
         }
+    }
+
+    /**
+     * 按 submitId 幂等写入 Outbox（存在则复用），供终态事务内调用
+     *
+     * @param submission 提交记录（终态已落库，包含 judgeTime）
+     * @return 已存在或新写入的 Outbox 记录
+     */
+    private JudgeOutbox createOutboxIfAbsent(JudgeSubmission submission) throws Exception {
+        JudgeOutbox existing = judgeOutboxMapper.selectOne(new LambdaQueryWrapper<JudgeOutbox>()
+                .eq(JudgeOutbox::getSubmitId, submission.getSubmitId())
+                .last("limit 1"));
+        if (existing != null) {
+            return existing;
+        }
+        JudgeOutbox outbox = new JudgeOutbox();
+        outbox.setSubmitId(submission.getSubmitId());
+        outbox.setPayload(objectMapper.writeValueAsString(buildResultMessage(submission)));
+        outbox.setStatus(JudgeOutbox.STATUS_PENDING);
+        outbox.setRetryCount(0);
+        outbox.setNextRetryTime(LocalDateTime.now());
+        judgeOutboxMapper.insert(outbox);
+        return outbox;
+    }
+
+    /**
+     * 兜底置终态并把结果消息写入 Outbox（同一事务）
+     * <p>
+     * 死信/卡死补偿链路使用：终态与待投递消息原子落库，避免“已置终态但结果未广播”的丢失窗口。
+     * 返回 true 后调用方再执行 {@link #broadcast(JudgeSubmission)}，会复用已写入的 Outbox 记录投递。
+     *
+     * @param submission     提交记录
+     * @param terminalStatus 目标终态
+     * @param errorMessage   错误信息
+     * @return 仅本次成功置为终态返回 true；已终态或并发冲突返回 false
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean transitionToTerminalAndSaveOutbox(JudgeSubmission submission, JudgeStatusEnum terminalStatus,
+                                                     String errorMessage) {
+        if (!stateMachineService.transitionToTerminal(submission, terminalStatus, errorMessage)) {
+            return false;
+        }
+        try {
+            createOutboxIfAbsent(submission);
+        } catch (Exception e) {
+            // 落库失败不阻断终态，广播时会重试写入或退化为直接投递
+            log.error("兜底终态结果落本地消息表失败，广播时重试 submitId={}", submission.getSubmitId(), e);
+        }
+        return true;
     }
 
     /**

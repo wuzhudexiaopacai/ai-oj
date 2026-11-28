@@ -9,7 +9,6 @@ import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.BizDeadLetterMapper;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.service.JudgeExecuteService;
-import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeStateMachineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.common.message.MessageExt;
@@ -36,8 +35,6 @@ public class JudgeDlqConsumer implements RocketMQListener<MessageExt> {
 
     private final JudgeSubmissionMapper judgeSubmissionMapper;
 
-    private final JudgeStateMachineService stateMachineService;
-
     private final JudgeExecuteService judgeExecuteService;
 
     private final ObjectMapper objectMapper;
@@ -59,7 +56,7 @@ public class JudgeDlqConsumer implements RocketMQListener<MessageExt> {
                     : judgeSubmissionMapper.selectById(submitMessage.getSubmissionId());
             if (submission != null
                     && !JudgeStatusEnum.fromCode(submission.getStatus()).isTerminal()) {
-                if (stateMachineService.transitionToTerminal(submission, JudgeStatusEnum.SYSTEM_ERROR,
+                if (judgeExecuteService.transitionToTerminalAndSaveOutbox(submission, JudgeStatusEnum.SYSTEM_ERROR,
                         "判题多次失败进入死信，已归档")) {
                     judgeExecuteService.broadcast(submission);
                 }

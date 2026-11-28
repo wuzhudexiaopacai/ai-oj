@@ -538,6 +538,10 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 
 `submitId` 由客户端生成 UUID，网络重试、双击、刷新都安全。
 
+### 判题结果可靠投递（Transactional Outbox）
+
+终态落库、用例明细写入与结果消息（`judge_outbox`）在同一个本地事务中提交：进程若在「终态已提交、消息尚未投递」之间崩溃，补偿任务仍能从 Outbox 补投，不会永久丢失题目统计与比赛成绩；投递失败由 `ResultOutboxResendJob` 按退避重试。死信与卡死补偿链路置终态时同样先写 Outbox 再广播。
+
 ### Rust 沙箱安全隔离
 
 每个编译/运行动作拉起一次性容器，叠加多层限制：

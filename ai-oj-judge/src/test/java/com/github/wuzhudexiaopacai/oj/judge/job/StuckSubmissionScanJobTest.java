@@ -7,7 +7,6 @@ import com.github.wuzhudexiaopacai.oj.common.core.enums.JudgeStatusEnum;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSubmission;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSubmissionMapper;
 import com.github.wuzhudexiaopacai.oj.judge.service.JudgeExecuteService;
-import com.github.wuzhudexiaopacai.oj.judge.statemachine.JudgeStateMachineService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.junit.jupiter.api.BeforeAll;
@@ -41,9 +40,6 @@ class StuckSubmissionScanJobTest {
     private JudgeSubmissionMapper judgeSubmissionMapper;
 
     @Mock
-    private JudgeStateMachineService stateMachineService;
-
-    @Mock
     private JudgeExecuteService judgeExecuteService;
 
     @Mock
@@ -62,8 +58,8 @@ class StuckSubmissionScanJobTest {
     void terminalConflictShouldNotBroadcastStaleSystemError() {
         JudgeSubmission submission = stuckSubmission();
         when(judgeSubmissionMapper.selectList(any())).thenReturn(List.of(submission));
-        when(stateMachineService.transitionToTerminal(eq(submission), eq(JudgeStatusEnum.SYSTEM_ERROR),
-                anyString())).thenReturn(false);
+        when(judgeExecuteService.transitionToTerminalAndSaveOutbox(eq(submission),
+                eq(JudgeStatusEnum.SYSTEM_ERROR), anyString())).thenReturn(false);
 
         stuckSubmissionScanJob.executeInternal(null);
 
@@ -75,8 +71,8 @@ class StuckSubmissionScanJobTest {
     void successfulTerminalTransitionShouldBroadcast() {
         JudgeSubmission submission = stuckSubmission();
         when(judgeSubmissionMapper.selectList(any())).thenReturn(List.of(submission));
-        when(stateMachineService.transitionToTerminal(eq(submission), eq(JudgeStatusEnum.SYSTEM_ERROR),
-                anyString())).thenReturn(true);
+        when(judgeExecuteService.transitionToTerminalAndSaveOutbox(eq(submission),
+                eq(JudgeStatusEnum.SYSTEM_ERROR), anyString())).thenReturn(true);
 
         stuckSubmissionScanJob.executeInternal(null);
 
