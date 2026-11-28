@@ -8,6 +8,7 @@ import com.github.wuzhudexiaopacai.oj.common.core.enums.ContestStatusEnum;
 import com.github.wuzhudexiaopacai.oj.contest.dto.ContestEventMessage;
 import com.github.wuzhudexiaopacai.oj.contest.entity.Contest;
 import com.github.wuzhudexiaopacai.oj.contest.mapper.ContestMapper;
+import com.github.wuzhudexiaopacai.oj.contest.service.ContestRankService;
 import com.github.wuzhudexiaopacai.oj.contest.service.ContestService;
 import com.github.wuzhudexiaopacai.oj.contest.service.impl.ContestServiceImpl;
 import com.github.wuzhudexiaopacai.oj.contest.vo.ContestTimeVO;
@@ -77,6 +78,8 @@ public class ContestStatusScanTask {
 
     private final ContestService contestService;
 
+    private final ContestRankService contestRankService;
+
     private final ContestWsPushService wsPushService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -105,6 +108,8 @@ public class ContestStatusScanTask {
                     Contest::getStartTime, EVENT_START);
             migrate(now, ContestStatusEnum.RUNNING, ContestStatusEnum.ENDED,
                     Contest::getEndTime, EVENT_END);
+            // 到达封榜时间的进行中比赛冻结一次榜单：封榜快照缺失时排行榜会降级为实时榜，普通用户仍能看到最新结果
+            snapshotSealedContests(now);
         } finally {
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
@@ -147,6 +152,28 @@ public class ContestStatusScanTask {
                 wsPushService.publish(snapshot);
             }
             sendContestEvent(eventType, contest);
+        }
+    }
+
+    /**
+     * 为已到封榜时间的进行中比赛写入冻结快照（已写入的跳过，快照永久保留）
+     *
+     * @param now 当前时间
+     */
+    private void snapshotSealedContests(LocalDateTime now) {
+        List<Contest> sealed = contestMapper.selectList(new LambdaQueryWrapper<Contest>()
+                .eq(Contest::getStatus, ContestStatusEnum.RUNNING.name())
+                .isNotNull(Contest::getSealTime)
+                .le(Contest::getSealTime, now)
+                .orderByAsc(Contest::getId)
+                .last("LIMIT " + SCAN_BATCH_LIMIT));
+        for (Contest contest : sealed) {
+            try {
+                contestRankService.writeSealSnapshotIfAbsent(contest.getId());
+            } catch (Exception e) {
+                // 单个比赛结算失败不影响其他比赛与本轮状态扫描
+                log.error("封榜快照写入失败 contestId={}", contest.getId(), e);
+            }
         }
     }
 

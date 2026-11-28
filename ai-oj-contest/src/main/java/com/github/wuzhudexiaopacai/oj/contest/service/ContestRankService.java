@@ -21,4 +21,14 @@ public interface ContestRankService {
      * @return 排行榜列表
      */
     List<ContestRankVO> rank(Long contestId);
+
+    /**
+     * 到达封榜时间后写入冻结快照（已存在则跳过）
+     * <p>
+     * 封榜快照只在比赛结束时由判题服务写入的话，封榜到结束之间普通用户会读到实时榜，
+     * 封榜形同虚设；因此由状态扫描任务在 sealTime 到达后主动冻结一次当前榜单。
+     *
+     * @param contestId 比赛 ID
+     */
+    void writeSealSnapshotIfAbsent(Long contestId);
 }

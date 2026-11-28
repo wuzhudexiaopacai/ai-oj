@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -24,16 +25,21 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -226,5 +232,60 @@ class ContestRankServiceImplTest {
         assertEquals(2, ranks.size());
         // 管理员不走封榜快照
         verify(valueOperations, never()).get(anyString());
+    }
+
+    @Test
+    void unreadableSnapshotShouldFallbackInsteadOfFailing() {
+        when(contestMapper.selectById(1L)).thenReturn(contestOf(0, true));
+        // 历史快照可能由不可变集合写入，读取时反序列化异常：应按缺失处理而不是让接口 500
+        when(valueOperations.get(anyString())).thenThrow(new RuntimeException("deserialize failed"));
+        doReturn(Result.ok(List.of(recordOf(1L, 90, 1)))).when(judgeFeignClient).listContestRecord(1L);
+
+        List<ContestRankVO> ranks = rankService.rank(1L);
+
+        assertEquals(1, ranks.size());
+        assertEquals(1, ranks.get(0).getRank());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sealSnapshotShouldBeWrittenAsMutableList() {
+        when(redisTemplate.hasKey("contest:rank:1")).thenReturn(false);
+        when(contestMapper.selectById(1L)).thenReturn(contestOf(0, true));
+        ContestRecordDTO first = recordOf(1L, 90, null);
+        ContestRecordDTO second = recordOf(2L, 110, null);
+        doReturn(Result.ok(List.of(first, second))).when(judgeFeignClient).listContestRecord(1L);
+        RankingStrategy strategy = mock(RankingStrategy.class);
+        when(rankingStrategyFactory.getStrategy(0)).thenReturn(strategy);
+        when(strategy.sort(anyList())).thenReturn(List.of(second, first));
+
+        rankService.writeSealSnapshotIfAbsent(1L);
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(valueOperations).setIfAbsent(eq("contest:rank:1"), captor.capture());
+        // 不可变集合无法被 RedisTemplate 的 JSON 序列化读回，必须写 ArrayList
+        assertInstanceOf(ArrayList.class, captor.getValue());
+        assertEquals(2L, ((List<ContestRecordDTO>) captor.getValue()).get(0).getUserId());
+    }
+
+    @Test
+    void sealSnapshotShouldSkipWhenAlreadyFrozen() {
+        when(redisTemplate.hasKey("contest:rank:1")).thenReturn(true);
+
+        rankService.writeSealSnapshotIfAbsent(1L);
+
+        verify(judgeFeignClient, never()).listContestRecord(anyLong());
+        verify(valueOperations, never()).setIfAbsent(anyString(), any());
+    }
+
+    @Test
+    void sealSnapshotShouldSkipWhenJudgeUnavailable() {
+        when(redisTemplate.hasKey("contest:rank:1")).thenReturn(false);
+        when(contestMapper.selectById(1L)).thenReturn(contestOf(0, true));
+        doThrow(new RuntimeException("judge down")).when(judgeFeignClient).listContestRecord(1L);
+
+        assertDoesNotThrow(() -> rankService.writeSealSnapshotIfAbsent(1L));
+
+        verify(valueOperations, never()).setIfAbsent(anyString(), any());
     }
 }

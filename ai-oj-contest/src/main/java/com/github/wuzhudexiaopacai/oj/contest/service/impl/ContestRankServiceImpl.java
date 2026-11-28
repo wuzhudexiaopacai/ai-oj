@@ -66,8 +66,9 @@ public class ContestRankServiceImpl implements ContestRankService {
         boolean admin = loginUser != null && loginUser.hasAuthority(AUTHORITY_CONTEST_MANAGE);
         boolean sealed = contest.getSealTime() != null && !LocalDateTime.now().isBefore(contest.getSealTime());
         if (sealed && !admin) {
-            // 封榜后普通用户只看快照（judge 服务消费比赛结束事件时写入，契约：List<ContestRecordDTO>，api 共享类跨服务反序列化无类型风险）
-            Object snapshot = redisTemplate.opsForValue().get(RedisKeys.CONTEST_RANK + contestId);
+            // 封榜后普通用户只看快照（封榜时由状态扫描任务冻结一次，比赛结束再覆盖为最终榜；
+            // 契约：List<ContestRecordDTO>，api 共享类跨服务反序列化无类型风险）
+            Object snapshot = readRankSnapshot(contestId);
             if (snapshot instanceof List<?> list && !list.isEmpty()) {
                 List<ContestRecordDTO> records = list.stream()
                         .filter(ContestRecordDTO.class::isInstance)
@@ -87,6 +88,55 @@ public class ContestRankServiceImpl implements ContestRankService {
         }
         // 实时榜每次从成绩源重建：增量 ZSet 会漏掉未增量写入/缓存过期的用户，导致榜单人数不全
         return rebuildRank(contest, oi);
+    }
+
+    @Override
+    public void writeSealSnapshotIfAbsent(Long contestId) {
+        String key = RedisKeys.CONTEST_RANK + contestId;
+        // 已有快照（封榜已冻结或比赛已结束写入最终榜）不再覆盖
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(key))) {
+            return;
+        }
+        Contest contest = contestMapper.selectById(contestId);
+        if (contest == null) {
+            return;
+        }
+        Result<List<ContestRecordDTO>> result;
+        try {
+            result = judgeFeignClient.listContestRecord(contestId);
+        } catch (Exception e) {
+            // 判题服务暂不可用：本轮跳过，下轮扫描重试
+            log.warn("封榜快照生成失败，判题服务不可用 contestId={}", contestId, e);
+            return;
+        }
+        if (result == null || !result.isSuccess() || result.getData() == null) {
+            log.warn("封榜快照生成失败，成绩数据不可用 contestId={}", contestId);
+            return;
+        }
+        List<ContestRecordDTO> records = result.getData();
+        if (records.isEmpty()) {
+            return;
+        }
+        List<ContestRecordDTO> sorted = rankingStrategyFactory.getStrategy(contest.getType()).sort(records);
+        // 必须写入可变集合：RedisTemplate 使用 GenericJackson2JsonRedisSerializer（NON_FINAL 类型信息），
+        // 不可变集合（toList/List.of）序列化后不带类型信息，读取时会反序列化失败
+        redisTemplate.opsForValue().setIfAbsent(key, new ArrayList<>(sorted));
+        log.info("比赛 {} 已写入封榜快照，共 {} 人", contestId, sorted.size());
+    }
+
+    /**
+     * 读取封榜快照：快照损坏（历史数据为不可反序列化的不可变集合）时按缺失处理，避免排行榜接口 500
+     *
+     * @param contestId 比赛 ID
+     * @return 快照对象；读取失败返回 null
+     */
+    private Object readRankSnapshot(Long contestId) {
+        try {
+            return redisTemplate.opsForValue().get(RedisKeys.CONTEST_RANK + contestId);
+        } catch (Exception e) {
+            log.warn("封榜快照读取失败，按缺失处理 contestId={}", contestId, e);
+            return null;
+        }
     }
 
     /**

@@ -516,7 +516,7 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 - **状态扫描**：`ContestStatusScanTask` 每 5s 执行，Redisson 锁 + 乐观锁，`SCHEDULED → RUNNING → ENDED`，发 `AI_OJ_CONTEST_EVENT:start/end` 并通过 `/ws/contest` 推送
 - **成绩计算**：`ContestRecordConsumer` 只处理 `contestId != 0` 的结果消息；同一用户同题用 Redis Set 去重；罚时 = 首次 AC 提交时间 − 比赛开始时间；OI 累加 `totalScore`
 - **独立计分**：仅统计比赛期间携带对应 `contestId` 的提交，赛前 AC 不继承
-- **排行榜**：实时经 judge Feign 拉取；封榜后非管理员读 Redis 快照（`contest:rank:{id}`，TTL 30s），快照缺失时回读 `contest_record.rank_snapshot`（判题服务在比赛结束时按赛制结算写入）兜底，仍无数据才降级实时榜；策略工厂排序（ACM 通过数降序 + 罚时升序，OI 总分降序）；只返回比赛期间有提交的用户，避免报名者全量上榜
+- **排行榜**：实时经 judge Feign 拉取；到达封榜时间后由状态扫描任务冻结一次 Redis 快照（`contest:rank:{id}`，永久保留），比赛结束再由判题服务按赛制结算覆盖为最终榜；快照缺失时回读 `contest_record.rank_snapshot` 兜底，仍无数据才降级实时榜；策略工厂排序（ACM 通过数降序 + 罚时升序，OI 总分降序）；只返回比赛期间有提交的用户，避免报名者全量上榜
 
 ### 文件链路
 
