@@ -11,10 +11,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -71,6 +74,19 @@ class ContestEventConsumerTest {
         consumer.onMessage(messageOf(1));
 
         assertEquals(List.of(1, 1, 3), settledRanks());
+    }
+
+    @Test
+    void snapshotShouldBeWrittenAsMutableList() {
+        when(contestRecordMapper.selectList(any())).thenReturn(List.of(recordOf(1L, 2, 100L, 200)));
+
+        consumer.onMessage(messageOf(0));
+
+        // 必须写入可变集合：不可变 List 经 GenericJackson2JsonRedisSerializer 序列化后缺少类型信息，读取会失败
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(valueOperations).set(eq("contest:rank:1"), captor.capture());
+        assertInstanceOf(ArrayList.class, captor.getValue());
+        assertEquals(1, ((List<?>) captor.getValue()).size());
     }
 
     private List<Integer> settledRanks() {

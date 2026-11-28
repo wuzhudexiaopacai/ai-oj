@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -92,7 +93,9 @@ public class ContestEventConsumer implements RocketMQListener<ContestEventConsum
             dto.setRankSnapshot(record.getRankSnapshot());
             return dto;
         }).toList();
-        redisTemplate.opsForValue().set(RedisKeys.CONTEST_RANK + contestId, snapshot);
+        // 必须写入可变集合：common-web 的 RedisTemplate 使用 GenericJackson2JsonRedisSerializer（NON_FINAL 类型信息），
+        // stream().toList()/List.of() 生成的是 final 不可变集合，序列化后不带类型信息，读取时无法反序列化
+        redisTemplate.opsForValue().set(RedisKeys.CONTEST_RANK + contestId, new ArrayList<>(snapshot));
         log.info("比赛 {} 封榜快照已写入 Redis，共 {} 人", contestId, snapshot.size());
     }
 
