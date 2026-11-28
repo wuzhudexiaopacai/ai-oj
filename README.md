@@ -466,7 +466,7 @@ Rust Sandbox /judge：编译容器 → 逐用例运行容器
 - **状态机**：Spring StateMachine 工厂模式，每次消费新建实例；状态以 `judge_submission.status` 为权威存储，不做内存持久态
 - **进度通道**：WebSocket `/ws/judge` 为主，Redis `judge:progress:{userId}:{submitId}` 缓存 + HTTP 轮询兜底
 - **卡死补偿**：Quartz 集群模式（JDBC 持久化，`QRTZ_*`），`0 * * * * ?` 每分钟扫描非终态且超时的提交，重试 3 次后置 `SYSTEM_ERROR` 并广播
-- **沙箱调度**：最小负载优先（Redis key `judge:sandbox:load:{sandboxKey}`，带 10 分钟 TTL，进程崩溃后自动归零；全部实例满载时仍选最低负载者排队），失败节点拉黑 30s，最多重试 3 次（4xx 请求错误不拉黑）；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度
+- **沙箱调度**：最小负载优先（Redis key `judge:sandbox:load:{sandboxKey}`，带 10 分钟 TTL，进程崩溃后自动归零；全部实例满载时仍选最低负载者排队），失败节点拉黑 30s，最多重试 3 次（4xx 请求错误不拉黑）；定时（默认 30s）探测各节点 `/health` 刷新 `last_heartbeat`，超过 90s 未刷新的节点不参与调度；多实例部署时由 Redisson 锁保证每轮只有一个实例执行探测
 - **并行预读**：提交分页并行回填题目简要信息；判题启动并行拉取多份测试用例文件；提交详情并行预读失败用例文件，缩短列表、详情与判题启动的加载耗时
 
 ### AI 对话链路（POST + SSE）

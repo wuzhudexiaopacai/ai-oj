@@ -4,15 +4,21 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.wuzhudexiaopacai.oj.judge.entity.JudgeSandbox;
 import com.github.wuzhudexiaopacai.oj.judge.mapper.JudgeSandboxMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 沙箱注册中心：定时健康探测刷新 last_heartbeat/status，选机时过滤心跳过期节点
+ * <p>
+ * 判题服务多实例部署时，通过 Redisson 锁保证同一时刻只有一个实例执行探测，
+ * 避免对沙箱重复探测与并发写心跳。
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -21,9 +27,21 @@ import java.util.List;
 @Component
 public class SandboxRegistry {
 
+    /**
+     * 探测任务分布式锁：保证多实例下每轮只有一个实例探测
+     */
+    private static final String HEARTBEAT_LOCK_KEY = "judge:sandbox:heartbeat:lock";
+
+    /**
+     * 锁租期（秒）：探测异常卡住时自动释放，避免永久阻塞其他实例
+     */
+    private static final long HEARTBEAT_LOCK_LEASE_SECONDS = 60L;
+
     private final JudgeSandboxMapper judgeSandboxMapper;
 
     private final SandboxProbe sandboxProbe;
+
+    private final RedissonClient redissonClient;
 
     /**
      * 心跳有效期（秒）：超过该时长未刷新视为过期
@@ -32,17 +50,46 @@ public class SandboxRegistry {
 
     public SandboxRegistry(JudgeSandboxMapper judgeSandboxMapper,
                            SandboxProbe sandboxProbe,
+                           RedissonClient redissonClient,
                            @Value("${ai-oj.judge.sandbox.stale-seconds:90}") long staleSeconds) {
         this.judgeSandboxMapper = judgeSandboxMapper;
         this.sandboxProbe = sandboxProbe;
+        this.redissonClient = redissonClient;
         this.staleSeconds = staleSeconds;
     }
 
     /**
      * 定时探测所有沙箱：健康则刷新心跳并置在线，不可用则置离线
+     * <p>
+     * 多实例部署时只有拿到锁的实例执行探测，其余实例本轮直接跳过（下一轮再竞争）。
      */
     @Scheduled(fixedDelayString = "${ai-oj.judge.sandbox.heartbeat-interval-ms:30000}")
     public void refreshHeartbeats() {
+        RLock lock = redissonClient.getLock(HEARTBEAT_LOCK_KEY);
+        boolean locked;
+        try {
+            // waitTime=0：拿不到锁立即返回，不阻塞调度线程
+            locked = lock.tryLock(0, HEARTBEAT_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("沙箱心跳探测获取锁被中断，本轮跳过");
+            return;
+        }
+        if (!locked) {
+            log.debug("其他实例正在执行沙箱心跳探测，本轮跳过");
+            return;
+        }
+        try {
+            doRefreshHeartbeats();
+        } finally {
+            // 租期可能已过或锁被他人持有，只有当前线程持有时才解锁
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+    }
+
+    private void doRefreshHeartbeats() {
         List<JudgeSandbox> sandboxes = judgeSandboxMapper.selectList(null);
         if (sandboxes == null || sandboxes.isEmpty()) {
             return;
