@@ -513,7 +513,7 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 
 - **报名**：`@GlobalTransactional`（Seata AT）——contest 写报名记录 + judge `initContestRecord` 参与方；`uk_contest_user` 幂等；取消报名物理删除；私有赛校验密码
 - **提交前置校验**：比赛未取消、已报名、比赛进行中、题目属于该比赛
-- **状态扫描**：`ContestStatusScanTask` 每 5s 执行，Redisson 锁 + 乐观锁，`SCHEDULED → RUNNING → ENDED`，发 `AI_OJ_CONTEST_EVENT:start/end` 并通过 `/ws/contest` 推送
+- **状态扫描**：`ContestStatusScanTask` 每 5s 执行，Redisson 锁 + 乐观锁，`SCHEDULED → RUNNING → ENDED`；开赛只做状态迁移与 `/ws/contest` 推送，结束时发 `AI_OJ_CONTEST_EVENT:end` 供判题服务结算榜单
 - **成绩计算**：`ContestRecordConsumer` 只处理 `contestId != 0` 的结果消息；同一用户同题用 Redis Set 去重；罚时 = 首次 AC 提交时间 − 比赛开始时间；OI 累加 `totalScore`
 - **独立计分**：仅统计比赛期间携带对应 `contestId` 的提交，赛前 AC 不继承
 - **排行榜**：实时经 judge Feign 拉取；到达封榜时间后由状态扫描任务冻结一次 Redis 快照（`contest:rank:{id}`，永久保留），比赛结束再由判题服务按赛制结算覆盖为最终榜；快照缺失时回读 `contest_record.rank_snapshot` 兜底，仍无数据才降级实时榜；策略工厂排序（ACM 通过数降序 + 罚时升序，OI 总分降序）；只返回比赛期间有提交的用户，避免报名者全量上榜
@@ -649,9 +649,12 @@ AiGenerateService：专用模型参数（qwen-plus-latest，max-tokens 16384，
 | `AI_OJ_LOGIN_LOG` | 登录日志异步落库 |
 | `AI_OJ_FILE_CLEAN` | 分片临时文件延时清理 |
 | `AI_OJ_AI_TASK` | AI 异步任务（出题/批量评审） |
-| `AI_OJ_CONTEST_EVENT` | 比赛开始/结束事件 |
+| `AI_OJ_CONTEST_EVENT` | 比赛结束事件（判题服务按赛制结算榜单） |
 
-- 消费失败重试 3 次后进入死信队列 `%DLQ%`，同时落 `biz_dead_letter` 表；管理端 `/api/admin/dead-letter/**` 支持分页查看、原样重放、标记忽略（记录处理备注 `handle_remark` 与状态）
+- 判题提交链路的消费失败重试 3 次后进入死信队列 `%DLQ%`，同时落 `biz_dead_letter` 表；管理端 `/api/admin/dead-letter/**` 支持分页查看、原样重放、标记忽略（记录处理备注 `handle_remark` 与状态）
+- 其余消费组（用户统计、题目统计、ES 同步、文件清理、比赛成绩）均注册了 DLQ 消费者，重试超限后以 ERROR 日志归档 msgId 与消息体（Kibana 可检索，RocketMQ 保留期内可按 msgId 重放）
+- AI 异步任务调用大模型成本高，失败最多重试 2 次，超限后标记 FAILED 并确认消费，避免持续重投重复计费
+- 题目 ES 同步消息在事务提交后发送（消费端回读 MySQL，避免读到旧状态）；ES 仅是检索索引，DB 为权威数据
 - 跨服务写操作（比赛报名）走 **Seata AT**，各库带 `undo_log`
 - Quartz 集群调度故障自动接管，补偿卡死判题
 
