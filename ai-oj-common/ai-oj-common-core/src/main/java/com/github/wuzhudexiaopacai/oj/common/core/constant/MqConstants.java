@@ -4,7 +4,9 @@ package com.github.wuzhudexiaopacai.oj.common.core.constant;
  * RocketMQ Topic / Tag / 消费组统一常量
  * <p>
  * 死信队列说明：RocketMQ 自动为消费失败超限的消息生成 %DLQ%${consumerGroup} 队列，
- * 各服务需为核心消费组注册对应 DLQ 消费者做归档与补偿。
+ * 各服务需为核心消费组注册对应 DLQ 消费者做归档与补偿。判题提交链路有独立死信表
+ * （biz_dead_letter，支持管理端重放）；其余消费组以 ERROR 日志归档消息体（Kibana 可检索），
+ * 需要重放时可在 RocketMQ 控制台按 msgId 处理。
  *
  * @author wuzhudexiaopacai
  * @since 1.0
@@ -95,9 +97,39 @@ public class MqConstants {
     public static final String GROUP_FILE_CLEAN = "ai-oj-file-clean-consumer";
 
     /**
+     * AI 异步任务消费组
+     */
+    public static final String GROUP_AI_TASK = "ai-oj-ai-task-consumer";
+
+    /**
      * 判题死信处理消费组（订阅 %DLQ%ai-oj-judge-submit-consumer）
      */
     public static final String GROUP_JUDGE_DLQ = "ai-oj-judge-dlq-consumer";
+
+    /**
+     * 用户统计死信消费组（订阅 %DLQ%ai-oj-user-stat-consumer）
+     */
+    public static final String GROUP_USER_STAT_DLQ = "ai-oj-user-stat-dlq-consumer";
+
+    /**
+     * 题目统计死信消费组（订阅 %DLQ%ai-oj-problem-stat-consumer）
+     */
+    public static final String GROUP_PROBLEM_STAT_DLQ = "ai-oj-problem-stat-dlq-consumer";
+
+    /**
+     * 题目 ES 同步死信消费组（订阅 %DLQ%ai-oj-problem-es-consumer）
+     */
+    public static final String GROUP_PROBLEM_ES_DLQ = "ai-oj-problem-es-dlq-consumer";
+
+    /**
+     * 文件清理死信消费组（订阅 %DLQ%ai-oj-file-clean-consumer）
+     */
+    public static final String GROUP_FILE_CLEAN_DLQ = "ai-oj-file-clean-dlq-consumer";
+
+    /**
+     * 比赛成绩死信消费组（订阅 %DLQ%ai-oj-contest-record-consumer）
+     */
+    public static final String GROUP_CONTEST_RECORD_DLQ = "ai-oj-contest-record-dlq-consumer";
 
     /**
      * 判题失败最大业务重试次数（超过后进入死信）
