@@ -541,30 +541,69 @@ public class ProblemServiceImpl implements ProblemService {
     }
 
     /**
-     * 写操作后处理：发 MQ 同步 ES + 事务提交后删除详情缓存
+     * 写操作后处理：事务提交后发送 ES 同步消息、删除详情缓存
      * <p>
-     * 缓存删除必须延迟到事务提交后：若在提交前删除，并发读会回源到旧的已提交数据并重新写回缓存，
-     * 导致缓存长期持有旧值直到 TTL 过期。MQ 发送保留在提交前，失败可触发回滚以保持 DB 与 ES 一致。
+     * 两者都必须等事务提交后才执行：
+     * 缓存删除若在提交前，并发读会回源到已提交的旧数据并重新写回缓存；
+     * ES 同步的消费端会回读 MySQL，提交前发送可能让消费端读到旧状态，把旧文档写进 ES。
+     * 提交后发送失败只记录错误（ES 仅是检索索引，DB 为权威数据，后续写入或重建索引可追平）。
      */
     private void afterWrite(Long problemId, String problemKey, ProblemSyncMessage message) {
-        rocketMQTemplate.syncSend(MqConstants.PROBLEM_SYNC_TOPIC, message);
-        evictDetailCacheAfterCommit(problemKey);
+        runAfterCommit(() -> {
+            sendProblemSync(problemId, message);
+            evictDetailCache(problemKey);
+        });
     }
 
     /**
-     * 注册事务提交回调失效详情缓存；无事务上下文时立即删除（兜底）
+     * 发送题目 ES 同步消息，失败重试一次后告警
+     *
+     * @param problemId 题目 ID（仅用于日志）
+     * @param message   同步消息
      */
-    private void evictDetailCacheAfterCommit(String problemKey) {
-        String cacheKey = RedisKeys.PROBLEM_DETAIL + problemKey;
+    private void sendProblemSync(Long problemId, ProblemSyncMessage message) {
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                rocketMQTemplate.syncSend(MqConstants.PROBLEM_SYNC_TOPIC, message);
+                return;
+            } catch (Exception e) {
+                if (attempt == 1) {
+                    log.warn("题目 ES 同步消息发送失败，重试一次 problemId={}", problemId, e);
+                } else {
+                    log.error("题目 ES 同步消息发送失败，ES 检索文档可能滞后 problemId={}", problemId, e);
+                }
+            }
+        }
+    }
+
+    /**
+     * 删除题目详情缓存
+     */
+    private void evictDetailCache(String problemKey) {
+        redisTemplate.delete(RedisKeys.PROBLEM_DETAIL + problemKey);
+    }
+
+    /**
+     * 事务提交后执行；无事务上下文时立即执行。提交后副作用失败只记日志，不影响已提交的请求
+     */
+    private void runAfterCommit(Runnable action) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    redisTemplate.delete(cacheKey);
+                    runSafely(action);
                 }
             });
         } else {
-            redisTemplate.delete(cacheKey);
+            runSafely(action);
+        }
+    }
+
+    private void runSafely(Runnable action) {
+        try {
+            action.run();
+        } catch (Exception e) {
+            log.warn("事务提交后处理失败", e);
         }
     }
 
