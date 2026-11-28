@@ -51,13 +51,18 @@ public class UserStatConsumer implements RocketMQListener<JudgeResultMessage> {
         try {
             int acceptDelta = Objects.equals(message.getStatusCode(), JudgeStatusEnum.ACCEPTED.getCode()) ? 1 : 0;
             userMapper.incrementStat(message.getUserId(), acceptDelta);
-            // 用户信息（含统计字段）带缓存，更新后失效，避免个人中心展示旧数据
-            redisTemplate.delete(RedisKeys.USER_INFO + message.getUserId());
         } catch (Exception e) {
             // 处理失败删除幂等标记，让消息重试时重新消费
             redisTemplate.delete(idemKey);
             log.error("用户统计失败: {}", message, e);
             throw e;
+        }
+        // 缓存失效是旁路操作：失败不能重放整条消息，否则已成功的统计会被重复累加，交给缓存 TTL 自然过期
+        try {
+            // 用户信息（含统计字段）带缓存，更新后失效，避免个人中心展示旧数据
+            redisTemplate.delete(RedisKeys.USER_INFO + message.getUserId());
+        } catch (Exception e) {
+            log.warn("用户信息缓存失效失败 userId={}，等待 TTL 自然过期", message.getUserId(), e);
         }
     }
 }
